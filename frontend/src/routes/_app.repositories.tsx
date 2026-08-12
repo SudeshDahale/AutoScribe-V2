@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { TechIcon } from "@/lib/tech-logos";
-import { availableGithubRepos, githubAccount, useRepos } from "@/lib/repo-store";
+import { useRepos } from "@/lib/repo-store";
 
 export const Route = createFileRoute("/_app/repositories")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -357,7 +357,7 @@ function EmptyState({ connected, onAdd }: { connected: number; onAdd: () => void
 }
 
 function ConnectDialog({ onClose }: { onClose: () => void }) {
-  const { isConnected, connect, disconnect, connecting } = useRepos();
+  const { repos, isConnected, connect, disconnect, connecting, availableRepos, githubHandle } = useRepos();
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -366,7 +366,7 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const list = availableGithubRepos.filter((r) =>
+  const list = availableRepos.filter((r) =>
     `${r.org}/${r.name}`.toLowerCase().includes(query.toLowerCase()),
   );
 
@@ -384,7 +384,7 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
             <div className="text-[15px] font-semibold">Connect a repository</div>
             <div className="mt-0.5 text-[12px] text-muted-foreground inline-flex items-center gap-1.5">
               <Check className="w-3 h-3 text-success" /> GitHub connected as{" "}
-              <span className="text-foreground">@{githubAccount.handle}</span>
+              <span className="text-foreground">@{githubHandle ?? "…"}</span>
             </div>
           </div>
           <button
@@ -448,7 +448,10 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
                 </div>
                 {on ? (
                   <button
-                    onClick={() => disconnect(r.id)}
+                    onClick={() => {
+                      const connected = repos.find((cr) => cr.githubRepoId === r.id);
+                      if (connected) disconnect(connected.id);
+                    }}
                     className="group shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border bg-surface-2 text-[12px] text-success hover:text-destructive hover:border-destructive/40 transition w-[112px] justify-center"
                   >
                     <Check className="w-3.5 h-3.5 group-hover:hidden" />
@@ -458,7 +461,7 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
                   </button>
                 ) : (
                   <button
-                    onClick={() => connect(r.id)}
+                    onClick={() => connect(r)}
                     disabled={busy}
                     className="shrink-0 inline-flex items-center justify-center gap-1.5 h-8 px-3 w-[112px] rounded-md bg-primary text-primary-foreground text-[12px] font-medium hover:brightness-95 disabled:opacity-60"
                   >

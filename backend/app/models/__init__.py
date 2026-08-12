@@ -8,6 +8,7 @@ from app.models.document import Document, DocumentVersion
 from app.models.pull_request import PullRequest
 from app.models.chat import ChatConversation, ChatMessage
 from app.models.activity import ActivityLog
+from app.models.session import UserSession
 
 __all__ = [
     "User",
@@ -24,4 +25,5 @@ __all__ = [
     "ChatConversation",
     "ChatMessage",
     "ActivityLog",
+    "UserSession",
 ]

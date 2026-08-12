@@ -1,7 +1,8 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { repositories } from "@/lib/mock-data";
 import { ArrowLeft, ArrowRight, Github, Lock, Globe, Check, Search, Loader2 } from "lucide-react";
+
 
 export const Route = createFileRoute("/connect")({
   head: () => ({
@@ -22,6 +23,14 @@ function Connect() {
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [starting, setStarting] = useState(false);
+
+  const [githubLogin, setGithubLogin] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setGithubLogin(data?.github_login ?? null));
+  }, []);
 
   const filtered = useMemo(
     () => repositories.filter((r) => r.name.toLowerCase().includes(query.toLowerCase())),
@@ -68,7 +77,7 @@ function Connect() {
         </ol>
 
         <div className="mt-8 flex items-center gap-2 text-[12px] text-muted-foreground">
-          <Check className="w-3.5 h-3.5 text-success" /> Connected as <span className="text-foreground">@johndoe</span>
+          <Check className="w-3.5 h-3.5 text-success" /> Connected as <span className="text-foreground">@{githubLogin ?? "…"}</span>
         </div>
 
         <h1 className="mt-2 text-[24px] tracking-tight font-semibold">Select a repository</h1>

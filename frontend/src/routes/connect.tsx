@@ -1,8 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { repositories } from "@/lib/mock-data";
+import { useMemo, useState } from "react";
+import { useRepos } from "@/lib/repo-store";
 import { ArrowLeft, ArrowRight, Github, Lock, Globe, Check, Search, Loader2 } from "lucide-react";
-
 
 export const Route = createFileRoute("/connect")({
   head: () => ({
@@ -20,27 +19,23 @@ export const Route = createFileRoute("/connect")({
 
 function Connect() {
   const navigate = useNavigate();
+  const { availableRepos, githubHandle, connect } = useRepos();
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [starting, setStarting] = useState(false);
 
-  const [githubLogin, setGithubLogin] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setGithubLogin(data?.github_login ?? null));
-  }, []);
-
   const filtered = useMemo(
-    () => repositories.filter((r) => r.name.toLowerCase().includes(query.toLowerCase())),
-    [query],
+    () => availableRepos.filter((r) => r.name.toLowerCase().includes(query.toLowerCase())),
+    [availableRepos, query],
   );
 
   const start = () => {
     if (!selected) return;
+    const repo = availableRepos.find((r) => r.id === selected);
+    if (!repo) return;
     setStarting(true);
-    setTimeout(() => navigate({ to: "/analyzing" }), 400);
+    connect(repo);
+    window.setTimeout(() => navigate({ to: "/analyzing" }), 400);
   };
 
   return (
@@ -50,7 +45,6 @@ function Connect() {
           <ArrowLeft className="w-3.5 h-3.5" /> Back
         </Link>
 
-        {/* Progress steps */}
         <ol className="mt-6 flex items-center gap-2 text-[11px]">
           {[
             { n: 1, label: "Account", done: true },
@@ -77,13 +71,11 @@ function Connect() {
         </ol>
 
         <div className="mt-8 flex items-center gap-2 text-[12px] text-muted-foreground">
-          <Check className="w-3.5 h-3.5 text-success" /> Connected as <span className="text-foreground">@{githubLogin ?? "…"}</span>
+          <Check className="w-3.5 h-3.5 text-success" /> Connected as <span className="text-foreground">@{githubHandle ?? "…"}</span>
         </div>
 
         <h1 className="mt-2 text-[24px] tracking-tight font-semibold">Select a repository</h1>
-        <p className="mt-1 text-[13px] text-muted-foreground">
-          Choose one repository. You can connect more later.
-        </p>
+        <p className="mt-1 text-[13px] text-muted-foreground">Choose one repository. You can connect more later.</p>
 
         <div className="relative mt-5">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />

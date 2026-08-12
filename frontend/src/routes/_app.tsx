@@ -46,7 +46,7 @@ function AppLayout() {
   }, []);
 
   return (
-    <RepoProvider>
+    <>
       <div className="min-h-screen bg-background text-foreground">
         <Sidebar
           collapsed={collapsed}
@@ -74,6 +74,6 @@ function AppLayout() {
           </main>
         </div>
       </div>
-    </RepoProvider>
+    </>
   );
 }

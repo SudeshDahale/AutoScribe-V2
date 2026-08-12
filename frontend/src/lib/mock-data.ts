@@ -1,5 +1,6 @@
 export type Repo = {
   id: string;
+  githubRepoId?: string;
   name: string;
   org: string;
   private: boolean;

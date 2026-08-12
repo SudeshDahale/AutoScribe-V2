@@ -54,11 +54,16 @@ function Auth() {
     return () => window.clearInterval(id);
   }, []);
 
-  const go = (kind: "github" | "email") => {
+const go = (kind: "github" | "email") => {
     if (pending) return;
+    if (kind === "github") {
+      setPending("github");
+      window.location.href = "/api/auth/github/login";
+      return;
+    }
     setPending(kind);
     window.setTimeout(() => navigate({ to: "/connect" }), 900);
-  };
+};
 
   return (
     <div className="min-h-screen bg-background text-foreground grid lg:grid-cols-[1fr_minmax(0,520px)]">

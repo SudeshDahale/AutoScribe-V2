@@ -76,6 +76,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
 
   const meQuery = useQuery({
     queryKey: ["auth-me"],
+    enabled: typeof window !== "undefined",
     queryFn: async () => {
       const res = await fetch("/api/auth/me");
       if (!res.ok) return null;
@@ -85,6 +86,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
 
   const reposQuery = useQuery({
     queryKey: ["repos"],
+    enabled: typeof window !== "undefined",
     queryFn: async () => {
       const res = await fetch("/api/repos");
       if (!res.ok) return [];
@@ -94,6 +96,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
 
   const availableQuery = useQuery({
     queryKey: ["github-repos"],
+    enabled: typeof window !== "undefined",
     queryFn: async () => {
       const res = await fetch("/api/github/repos");
       if (!res.ok) return [];

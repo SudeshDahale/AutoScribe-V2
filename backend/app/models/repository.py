@@ -11,6 +11,7 @@ class Repository(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    github_repo_id: Mapped[str | None] = mapped_column(String, nullable=True)
     name: Mapped[str] = mapped_column(String)
     org: Mapped[str] = mapped_column(String)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -19,7 +20,7 @@ class Repository(Base):
     understanding_score: Mapped[int] = mapped_column(Integer, default=0)
     docs_count: Mapped[int] = mapped_column(Integer, default=0)
     open_prs: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String, default="pending")  # pending | analyzing | synced
+    status: Mapped[str] = mapped_column(String, default="pending")
     last_activity_text: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -31,5 +32,5 @@ class RepoSettings(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), unique=True)
     auto_update: Mapped[bool] = mapped_column(Boolean, default=True)
-    update_target: Mapped[str] = mapped_column(String, default="pr")  # main | branch | pr
+    update_target: Mapped[str] = mapped_column(String, default="pr")
     branch_name: Mapped[str | None] = mapped_column(String, nullable=True)

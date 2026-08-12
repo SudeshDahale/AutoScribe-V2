@@ -9,35 +9,29 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ConnectRouteImport } from './routes/connect'
-import { Route as CompleteRouteImport } from './routes/complete'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AnalyzingRouteImport } from './routes/analyzing'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppSettingsRouteImport } from './routes/_app.settings'
-import { Route as AppRepositoriesRouteImport } from './routes/_app.repositories'
-import { Route as AppPullRequestsRouteImport } from './routes/_app.pull-requests'
-import { Route as AppDocumentsLogRouteImport } from './routes/_app.documents-log'
-import { Route as AppDocumentationRouteImport } from './routes/_app.documentation'
-import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
-import { Route as AppAskRouteImport } from './routes/_app.ask'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as AnalyzingRouteImport } from './routes/analyzing'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as CompleteRouteImport } from './routes/complete'
+import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as AppArchitectureRouteImport } from './routes/_app.architecture'
+import { Route as AppAskRouteImport } from './routes/_app.ask'
+import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppDocumentationRouteImport } from './routes/_app.documentation'
+import { Route as AppDocumentsLogRouteImport } from './routes/_app.documents-log'
+import { Route as AppPullRequestsRouteImport } from './routes/_app.pull-requests'
+import { Route as AppRepositoriesRouteImport } from './routes/_app.repositories'
+import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppRepositoryIdRouteImport } from './routes/_app.repository.$id'
 
-const ConnectRoute = ConnectRouteImport.update({
-  id: '/connect',
-  path: '/connect',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CompleteRoute = CompleteRouteImport.update({
-  id: '/complete',
-  path: '/complete',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyzingRoute = AnalyzingRouteImport.update({
@@ -45,43 +39,24 @@ const AnalyzingRoute = AnalyzingRouteImport.update({
   path: '/analyzing',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const CompleteRoute = CompleteRouteImport.update({
+  id: '/complete',
+  path: '/complete',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRoute,
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AppRepositoriesRoute = AppRepositoriesRouteImport.update({
-  id: '/repositories',
-  path: '/repositories',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPullRequestsRoute = AppPullRequestsRouteImport.update({
-  id: '/pull-requests',
-  path: '/pull-requests',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDocumentsLogRoute = AppDocumentsLogRouteImport.update({
-  id: '/documents-log',
-  path: '/documents-log',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDocumentationRoute = AppDocumentationRouteImport.update({
-  id: '/documentation',
-  path: '/documentation',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
+const AppArchitectureRoute = AppArchitectureRouteImport.update({
+  id: '/architecture',
+  path: '/architecture',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAskRoute = AppAskRouteImport.update({
@@ -89,9 +64,34 @@ const AppAskRoute = AppAskRouteImport.update({
   path: '/ask',
   getParentRoute: () => AppRoute,
 } as any)
-const AppArchitectureRoute = AppArchitectureRouteImport.update({
-  id: '/architecture',
-  path: '/architecture',
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDocumentationRoute = AppDocumentationRouteImport.update({
+  id: '/documentation',
+  path: '/documentation',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDocumentsLogRoute = AppDocumentsLogRouteImport.update({
+  id: '/documents-log',
+  path: '/documents-log',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPullRequestsRoute = AppPullRequestsRouteImport.update({
+  id: '/pull-requests',
+  path: '/pull-requests',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRepositoriesRoute = AppRepositoriesRouteImport.update({
+  id: '/repositories',
+  path: '/repositories',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
 const AppRepositoryIdRoute = AppRepositoryIdRouteImport.update({
@@ -213,32 +213,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/connect': {
-      id: '/connect'
-      path: '/connect'
-      fullPath: '/connect'
-      preLoaderRoute: typeof ConnectRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/complete': {
-      id: '/complete'
-      path: '/complete'
-      fullPath: '/complete'
-      preLoaderRoute: typeof CompleteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/analyzing': {
-      id: '/analyzing'
-      path: '/analyzing'
-      fullPath: '/analyzing'
-      preLoaderRoute: typeof AnalyzingRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app': {
@@ -248,53 +227,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/analyzing': {
+      id: '/analyzing'
+      path: '/analyzing'
+      fullPath: '/analyzing'
+      preLoaderRoute: typeof AnalyzingRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/settings': {
-      id: '/_app/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_app/repositories': {
-      id: '/_app/repositories'
-      path: '/repositories'
-      fullPath: '/repositories'
-      preLoaderRoute: typeof AppRepositoriesRouteImport
-      parentRoute: typeof AppRoute
+    '/complete': {
+      id: '/complete'
+      path: '/complete'
+      fullPath: '/complete'
+      preLoaderRoute: typeof CompleteRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_app/pull-requests': {
-      id: '/_app/pull-requests'
-      path: '/pull-requests'
-      fullPath: '/pull-requests'
-      preLoaderRoute: typeof AppPullRequestsRouteImport
-      parentRoute: typeof AppRoute
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_app/documents-log': {
-      id: '/_app/documents-log'
-      path: '/documents-log'
-      fullPath: '/documents-log'
-      preLoaderRoute: typeof AppDocumentsLogRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/documentation': {
-      id: '/_app/documentation'
-      path: '/documentation'
-      fullPath: '/documentation'
-      preLoaderRoute: typeof AppDocumentationRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
+    '/_app/architecture': {
+      id: '/_app/architecture'
+      path: '/architecture'
+      fullPath: '/architecture'
+      preLoaderRoute: typeof AppArchitectureRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/ask': {
@@ -304,11 +269,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAskRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/architecture': {
-      id: '/_app/architecture'
-      path: '/architecture'
-      fullPath: '/architecture'
-      preLoaderRoute: typeof AppArchitectureRouteImport
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/documentation': {
+      id: '/_app/documentation'
+      path: '/documentation'
+      fullPath: '/documentation'
+      preLoaderRoute: typeof AppDocumentationRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/documents-log': {
+      id: '/_app/documents-log'
+      path: '/documents-log'
+      fullPath: '/documents-log'
+      preLoaderRoute: typeof AppDocumentsLogRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pull-requests': {
+      id: '/_app/pull-requests'
+      path: '/pull-requests'
+      fullPath: '/pull-requests'
+      preLoaderRoute: typeof AppPullRequestsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/repositories': {
+      id: '/_app/repositories'
+      path: '/repositories'
+      fullPath: '/repositories'
+      preLoaderRoute: typeof AppRepositoriesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/repository/$id': {
@@ -358,3 +358,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

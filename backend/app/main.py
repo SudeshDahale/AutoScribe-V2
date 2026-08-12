@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.api.auth import router as auth_router
+from app.api.repos import router as repos_router
 
 app = FastAPI(title="AutoScribe API")
 
@@ -15,6 +16,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(repos_router)
 
 
 @app.get("/healthz")

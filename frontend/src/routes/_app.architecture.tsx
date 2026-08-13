@@ -15,9 +15,12 @@ import { LiveDiagram, DiagramLegend } from "@/components/architecture/live-diagr
 import {
   typeLabel,
   getRepoDiagrams,
+  buildDiagramFromApi,
   type GraphNode,
+  type ApiArchitectureResponse,
 } from "@/lib/architecture-graph";
 import { useRepos } from "@/lib/repo-store";
+import { useQuery } from "@tanstack/react-query";
 
 export const Route = createFileRoute("/_app/architecture")({
   head: () => ({
@@ -35,8 +38,25 @@ export const Route = createFileRoute("/_app/architecture")({
 
 function Architecture() {
   const { repos } = useRepos();
-  const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "ecommerce-platform");
-  const diagrams = useMemo(() => getRepoDiagrams(repoId), [repoId]);
+  const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
+
+  const { data: apiData, isLoading: loadingArchitecture } = useQuery({
+    queryKey: ["architecture", repoId],
+    queryFn: async () => {
+      const res = await fetch(`/api/repos/${repoId}/architecture`);
+      if (!res.ok) throw new Error("Failed to load architecture");
+      return res.json() as Promise<ApiArchitectureResponse>;
+    },
+    enabled: !!repoId,
+  });
+
+  // Real, backend-generated graph when the repo has a completed analysis;
+  // falls back to the illustrative mock otherwise (e.g. repo just connected,
+  // analysis still running, or apiData hasn't loaded yet).
+  const diagrams = useMemo(() => {
+    const real = apiData ? buildDiagramFromApi(apiData) : [];
+    return real.length > 0 ? real : getRepoDiagrams(repoId);
+  }, [apiData, repoId]);
   const [viewId, setViewId] = useState<string>(diagrams[0].id);
   const view = diagrams.find((v) => v.id === viewId) ?? diagrams[0];
 
@@ -63,6 +83,7 @@ function Architecture() {
           <p className="mt-1 text-[13px] text-muted-foreground">
             {currentRepo?.name ?? "All repositories"} · {activeView.nodes.length} components ·{" "}
             {activeView.edges.length} connections
+            {loadingArchitecture && " · loading real analysis…"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -72,11 +93,9 @@ function Architecture() {
             <select
               value={repoId}
               onChange={(e) => {
-                const next = e.target.value;
-                setRepoId(next);
-                const first = getRepoDiagrams(next)[0];
-                setViewId(first.id);
-                setSelectedId(first.nodes[0]?.id ?? "");
+                setRepoId(e.target.value);
+                setViewId("system");
+                setSelectedId("");
               }}
               className="bg-transparent text-foreground text-[12px] pr-1 focus:outline-none"
             >

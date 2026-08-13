@@ -34,6 +34,7 @@ type AnalysisStatus = {
   filesAnalyzed: number;
   modulesDetected: number;
   techStack: string[];
+  sampleFiles: string[];
 };
 
 function Analyzing() {
@@ -54,12 +55,22 @@ function Analyzing() {
     refetchInterval: (query) => (query.state.data?.status === "synced" || query.state.data?.status === "failed" ? false : 1500),
   });
 
+  const sampleFiles = data?.sampleFiles ?? [];
+  const [revealCount, setRevealCount] = useState(0);
+
   useEffect(() => {
-    if (data?.status === "synced") {
+    if (data?.status !== "synced") return;
+    if (sampleFiles.length === 0) {
       const t = setTimeout(() => setPhase("choose"), 600);
       return () => clearTimeout(t);
     }
-  }, [data?.status]);
+    if (revealCount >= sampleFiles.length) {
+      const t = setTimeout(() => setPhase("choose"), 500);
+      return () => clearTimeout(t);
+    }
+    const t = setTimeout(() => setRevealCount((c) => c + 1), 90);
+    return () => clearTimeout(t);
+  }, [data?.status, sampleFiles.length, revealCount]);
 
   useEffect(() => {
     if (phase !== "generate") return;
@@ -96,13 +107,36 @@ function Analyzing() {
                     : "Starting…"}
                 </div>
                 {data?.status === "synced" && (
-                  <div className="mt-6 rounded-lg border border-border bg-surface-1 p-4 text-[13px] space-y-1">
-                    <div className="flex items-center gap-2 text-success">
-                      <Check className="w-4 h-4" /> Analysis complete
+                  <div className="mt-6 grid md:grid-cols-2 gap-6">
+                    <div className="rounded-lg border border-border bg-surface-1 p-4 text-[13px] space-y-1 self-start">
+                      <div className="flex items-center gap-2 text-success">
+                        <Check className="w-4 h-4" /> Analysis complete
+                      </div>
+                      <div className="text-muted-foreground">{data.filesAnalyzed} files analyzed · {data.modulesDetected} modules detected</div>
+                      {data.techStack.length > 0 && (
+                        <div className="text-muted-foreground">Tech stack: {data.techStack.join(", ")}</div>
+                      )}
                     </div>
-                    <div className="text-muted-foreground">{data.filesAnalyzed} files analyzed · {data.modulesDetected} modules detected</div>
-                    {data.techStack.length > 0 && (
-                      <div className="text-muted-foreground">Tech stack: {data.techStack.join(", ")}</div>
+
+                    {sampleFiles.length > 0 && (
+                      <div className="rounded-lg border border-border bg-surface-1 overflow-hidden">
+                        <div className="px-3 py-2 border-b border-border flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <span>Scanner</span>
+                          <span className="ml-auto tabular-nums">
+                            {revealCount} / {sampleFiles.length} shown · {data.filesAnalyzed} total files
+                          </span>
+                        </div>
+                        <div className="relative h-[240px] p-3 font-mono text-[11px] text-muted-foreground overflow-hidden">
+                          <div className="space-y-1">
+                            {sampleFiles.slice(Math.max(0, revealCount - 14), revealCount).map((path) => (
+                              <div key={path} className="flex items-center gap-2 truncate">
+                                <span className="w-1 h-1 rounded-full bg-success shrink-0" />
+                                <span className="text-foreground/85 truncate">{path}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}

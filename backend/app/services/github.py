@@ -51,3 +51,13 @@ async def list_user_repos(token: str) -> list[dict]:
         }
         for r in repos
     ]
+    
+def get_repo_tree_sync(token: str, org: str, name: str, branch: str) -> list[dict]:
+    with httpx.Client() as client:
+        resp = client.get(
+            f"{GITHUB_API}/repos/{org}/{name}/git/trees/{branch}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            params={"recursive": "1"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("tree", [])

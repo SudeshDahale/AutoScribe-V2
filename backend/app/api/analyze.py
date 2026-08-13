@@ -54,6 +54,7 @@ def run_analysis(repo_id: int, token: str):
         analysis.modules_detected = len(modules)
         analysis.tech_stack = tech_stack
         analysis.architecture_style = []  # filled in by Sprint 5's LLM pass
+        analysis.sample_files = [item["path"] for item in blobs[:60]]
         analysis.completed_at = datetime.now(timezone.utc)
 
         repo.status = "synced"
@@ -113,4 +114,5 @@ def get_analysis(repo_id: int, user: User = Depends(get_current_user), db: DBSes
         "filesAnalyzed": analysis.files_analyzed,
         "modulesDetected": analysis.modules_detected,
         "techStack": analysis.tech_stack or [],
+        "sampleFiles": analysis.sample_files or [],
     }

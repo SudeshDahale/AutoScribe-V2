@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     github_redirect_uri: str = "http://localhost:8000/api/auth/github/callback"
     fernet_key: str
     frontend_url: str = "http://localhost:8081"
+    llm_api_key: str
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o-mini"
 
     @property
     def cors_origins_list(self) -> list[str]:

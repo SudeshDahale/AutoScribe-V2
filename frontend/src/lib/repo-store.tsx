@@ -54,7 +54,7 @@ type RepoStore = {
   repos: Repo[];
   connectedIds: string[];
   isConnected: (githubRepoId: string) => boolean;
-  connect: (repo: GithubRepo) => void;
+  connect: (repo: GithubRepo) => Promise<Repo>;
   disconnect: (id: string) => void;
   connecting: string | null;
   availableRepos: GithubRepo[];
@@ -119,7 +119,9 @@ export function RepoProvider({ children }: { children: ReactNode }) {
         }),
       });
       if (!res.ok) throw new Error("Failed to connect repository");
-      return res.json();
+      const created: Repo = await res.json();
+      await fetch(`/api/repos/${created.id}/analyze`, { method: "POST" });
+      return created;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
   });
@@ -136,9 +138,13 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   const connectedIds = repos.map((r) => r.id);
 
   const connect = useCallback(
-    (repo: GithubRepo) => {
+    async (repo: GithubRepo) => {
       setConnecting(repo.id);
-      connectMutation.mutate(repo, { onSettled: () => setConnecting(null) });
+      try {
+        return await connectMutation.mutateAsync(repo);
+      } finally {
+        setConnecting(null);
+      }
     },
     [connectMutation],
   );

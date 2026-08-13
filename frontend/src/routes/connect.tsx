@@ -29,13 +29,13 @@ function Connect() {
     [availableRepos, query],
   );
 
-  const start = () => {
+  const start = async () => {
     if (!selected) return;
     const repo = availableRepos.find((r) => r.id === selected);
     if (!repo) return;
     setStarting(true);
-    connect(repo);
-    window.setTimeout(() => navigate({ to: "/analyzing" }), 400);
+    const created = await connect(repo);
+    navigate({ to: "/analyzing", search: { repo: created.id } });
   };
 
   return (

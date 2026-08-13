@@ -7,6 +7,7 @@ import {
   Database,
   Zap,
   Bell,
+  Server,
 } from "lucide-react";
 
 export type GraphNodeType = "client" | "gateway" | "service" | "data";
@@ -332,4 +333,108 @@ const REPO_VIEWS: Record<string, () => DiagramView[]> = {
 export function getRepoDiagrams(repoId?: string | null): DiagramView[] {
   if (repoId && REPO_VIEWS[repoId]) return REPO_VIEWS[repoId]();
   return buildDefaultViews();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Real, backend-generated architecture (Sprint 5)                            */
+/* -------------------------------------------------------------------------- */
+
+/** Shape returned by GET /api/repos/:id/architecture — matches GraphNode /
+ *  GraphEdge minus the client-only fields (x, y, icon component). */
+export type ApiArchitectureNode = {
+  id: string;
+  label: string;
+  short: string;
+  type: GraphNodeType;
+  tech: string[];
+  files: number;
+  purpose: string;
+  doing: string;
+  health: GraphNode["health"];
+};
+
+export type ApiArchitectureEdge = {
+  from: string;
+  to: string;
+  label: string;
+  traffic: number;
+  kind: GraphEdge["kind"];
+};
+
+export type ApiArchitectureResponse = {
+  nodes: ApiArchitectureNode[];
+  edges: ApiArchitectureEdge[];
+  modules: { name: string; description: string; icon: string }[];
+  understandingScore: number;
+  techStack: string[];
+  architectureStyle: string[];
+};
+
+const COLUMN_X: Record<GraphNodeType, number> = {
+  client: 110,
+  gateway: 350,
+  service: 620,
+  data: 890,
+};
+
+/** Picks an icon by node type first, then by keyword match against the
+ *  label/tech the LLM returned — the backend never sends a component, only
+ *  data, so this is the "frontend lays it out" half of the pipeline. */
+function iconForNode(n: Pick<ApiArchitectureNode, "type" | "label" | "tech">) {
+  const hay = `${n.label} ${n.tech.join(" ")}`.toLowerCase();
+  if (hay.includes("redis") || hay.includes("cache") || hay.includes("queue")) return Zap;
+  if (hay.includes("postgres") || hay.includes("sql") || hay.includes("mongo") || n.type === "data") return Database;
+  if (hay.includes("stripe") || hay.includes("payment") || hay.includes("billing")) return CreditCard;
+  if (hay.includes("notif") || hay.includes("email") || hay.includes("mail") || hay.includes("sms")) return Bell;
+  if (hay.includes("user") || hay.includes("account") || hay.includes("profile")) return Users;
+  if (hay.includes("order") || hay.includes("cart") || hay.includes("checkout")) return ShoppingCart;
+  if (hay.includes("auth") || hay.includes("jwt") || n.type === "gateway") return Shield;
+  if (n.type === "client") return Monitor;
+  return Server;
+}
+
+/** Lays real nodes out in columns by type, stacked and centred within each
+ *  column — a plain layered layout, not anything the LLM decided. */
+function layoutNodes(nodes: ApiArchitectureNode[]): GraphNode[] {
+  const byType: Record<GraphNodeType, ApiArchitectureNode[]> = {
+    client: [],
+    gateway: [],
+    service: [],
+    data: [],
+  };
+  nodes.forEach((n) => byType[n.type]?.push(n));
+
+  const rowHeight = 140;
+  const positioned: GraphNode[] = [];
+  (Object.keys(byType) as GraphNodeType[]).forEach((type) => {
+    const group = byType[type];
+    const startY = 280 - ((group.length - 1) * rowHeight) / 2;
+    group.forEach((n, i) => {
+      positioned.push({
+        ...n,
+        x: COLUMN_X[type],
+        y: Math.max(80, startY + i * rowHeight),
+        icon: iconForNode(n),
+      });
+    });
+  });
+  return positioned;
+}
+
+/** Converts a real API response into the same DiagramView[] shape the mock
+ *  data produces. Returns [] when the repo hasn't been analyzed yet (or the
+ *  analysis produced no nodes) so callers can fall back to getRepoDiagrams(). */
+export function buildDiagramFromApi(data: ApiArchitectureResponse): DiagramView[] {
+  if (!data.nodes.length) return [];
+  return [
+    {
+      id: "system",
+      name: "System overview",
+      description: data.architectureStyle.length
+        ? `${data.architectureStyle.join(", ")} · inferred from the real repository`
+        : "Inferred from the real repository.",
+      nodes: layoutNodes(data.nodes),
+      edges: data.edges,
+    },
+  ];
 }

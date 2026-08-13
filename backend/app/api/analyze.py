@@ -6,9 +6,18 @@ from sqlalchemy.orm import Session as DBSession
 from app.api.auth import get_current_user
 from app.core.security import decrypt_token
 from app.db.session import SessionLocal, get_db
-from app.models import User, GithubAccount, Repository, Analysis, Module
+from app.models import (
+    User,
+    GithubAccount,
+    Repository,
+    Analysis,
+    Module,
+    ArchitectureNode,
+    ArchitectureEdge,
+)
 from app.services.github import get_repo_tree_sync
 from app.services.analysis import detect_tech_stack, detect_language_mix, bucket_modules
+from app.services.architecture import generate_architecture
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -36,30 +45,83 @@ def run_analysis(repo_id: int, token: str):
         db.commit()
         db.refresh(analysis)
 
+        # --- Structural pass (Sprint 4) ---
         tree = get_repo_tree_sync(token, repo.org, repo.name, repo.branch)
         blobs = [item for item in tree if item["type"] == "blob"]
 
         tech_stack = detect_tech_stack(tree)
         language_mix = detect_language_mix(tree)
-        modules = bucket_modules(tree)
-
-        db.query(Module).filter(Module.repository_id == repo.id).delete()
-        for m in modules:
-            db.add(Module(repository_id=repo.id, name=m["name"], description=m["description"], icon=m["icon"]))
+        directory_buckets = bucket_modules(tree)
+        sample_files = [item["path"] for item in blobs[:60]]
 
         top_language = max(language_mix, key=language_mix.get) if language_mix else None
 
+        # --- LLM pass (Sprint 5) ---
+        # Feeds the LLM only what the structural pass actually found — real
+        # tech stack, real directories, real file paths — not the whole repo.
+        result = generate_architecture(
+            repo_name=f"{repo.org}/{repo.name}",
+            tech_stack=tech_stack,
+            language_mix=language_mix,
+            directory_buckets=directory_buckets,
+            sample_files=sample_files,
+        )
+
+        # Replace modules with the LLM's richer descriptions (Sprint 4's
+        # `directory_buckets` were only ever meant as the LLM's raw material).
+        db.query(Module).filter(Module.repository_id == repo.id).delete()
+        for m in result["modules"]:
+            db.add(Module(repository_id=repo.id, name=m["name"], description=m["description"], icon=m["icon"]))
+
+        # Persist the architecture graph, tied to this analysis run.
+        db.query(ArchitectureNode).filter(ArchitectureNode.analysis_id == analysis.id).delete()
+        db.query(ArchitectureEdge).filter(ArchitectureEdge.analysis_id == analysis.id).delete()
+
+        node_pk_by_key: dict[str, int] = {}
+        for n in result["nodes"]:
+            node = ArchitectureNode(
+                analysis_id=analysis.id,
+                node_key=n["id"],
+                label=n["label"],
+                short=n["short"],
+                type=n["type"],
+                files=n["files"],
+                deps=n["tech"],
+                purpose=n["purpose"],
+                doing=n["doing"],
+                health=n["health"],
+            )
+            db.add(node)
+            db.flush()  # need node.id before edges can reference it
+            node_pk_by_key[n["id"]] = node.id
+
+        for e in result["edges"]:
+            source_pk = node_pk_by_key.get(e["from"])
+            target_pk = node_pk_by_key.get(e["to"])
+            if source_pk is None or target_pk is None:
+                continue  # LLM referenced a node id it didn't define — skip rather than crash
+            db.add(ArchitectureEdge(
+                analysis_id=analysis.id,
+                source_node_id=source_pk,
+                target_node_id=target_pk,
+                label=e["label"],
+                traffic=e["traffic"],
+                kind=e["kind"],
+            ))
+
         analysis.status = "synced"
         analysis.files_analyzed = len(blobs)
-        analysis.modules_detected = len(modules)
-        analysis.tech_stack = tech_stack
-        analysis.architecture_style = []  # filled in by Sprint 5's LLM pass
-        analysis.sample_files = [item["path"] for item in blobs[:60]]
+        analysis.modules_detected = len(result["modules"])
+        analysis.tech_stack = result["tech_stack"] or tech_stack
+        analysis.architecture_style = result["architecture_style"]
+        analysis.sample_files = sample_files
         analysis.completed_at = datetime.now(timezone.utc)
 
         repo.status = "synced"
         repo.language = top_language or repo.language
-        repo.last_activity_text = f"Analyzed {len(blobs)} files · just now"
+        repo.understanding_score = result["understanding_score"]
+        repo.docs_count = 0
+        repo.last_activity_text = f"Understanding score {result['understanding_score']} · {result['rationale']}"[:180]
 
         db.commit()
     except Exception:
@@ -115,4 +177,60 @@ def get_analysis(repo_id: int, user: User = Depends(get_current_user), db: DBSes
         "modulesDetected": analysis.modules_detected,
         "techStack": analysis.tech_stack or [],
         "sampleFiles": analysis.sample_files or [],
+    }
+
+
+@router.get("/repos/{repo_id}/architecture")
+def get_architecture(repo_id: int, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+    repo = _owned_repo(repo_id, user, db)
+    analysis = (
+        db.query(Analysis)
+        .filter(Analysis.repository_id == repo.id, Analysis.status == "synced")
+        .order_by(Analysis.id.desc())
+        .first()
+    )
+    if not analysis:
+        return {
+            "nodes": [],
+            "edges": [],
+            "modules": [],
+            "understandingScore": repo.understanding_score,
+            "techStack": [],
+            "architectureStyle": [],
+        }
+
+    nodes = db.query(ArchitectureNode).filter(ArchitectureNode.analysis_id == analysis.id).all()
+    edges = db.query(ArchitectureEdge).filter(ArchitectureEdge.analysis_id == analysis.id).all()
+    modules = db.query(Module).filter(Module.repository_id == repo.id).all()
+    node_key_by_pk = {n.id: n.node_key for n in nodes}
+
+    return {
+        "nodes": [
+            {
+                "id": n.node_key,
+                "label": n.label,
+                "short": n.short,
+                "type": n.type,
+                "tech": n.deps or [],
+                "files": n.files,
+                "purpose": n.purpose,
+                "doing": n.doing,
+                "health": n.health,
+            }
+            for n in nodes
+        ],
+        "edges": [
+            {
+                "from": node_key_by_pk.get(e.source_node_id, ""),
+                "to": node_key_by_pk.get(e.target_node_id, ""),
+                "label": e.label,
+                "traffic": e.traffic,
+                "kind": e.kind,
+            }
+            for e in edges
+        ],
+        "modules": [{"name": m.name, "description": m.description, "icon": m.icon} for m in modules],
+        "understandingScore": repo.understanding_score,
+        "techStack": analysis.tech_stack or [],
+        "architectureStyle": analysis.architecture_style or [],
     }

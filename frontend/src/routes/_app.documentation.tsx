@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { docsNav, readme, commitStream } from "@/lib/mock-data";
+import { docsNav, commitStream } from "@/lib/mock-data";
 import { useRepos } from "@/lib/repo-store";
+import { useQuery } from "@tanstack/react-query";
 import {
   Check,
   GitPullRequest,
@@ -84,8 +85,42 @@ const defaultTemplates: Template[] = [
 
 const docStyles = ["Technical, concise", "Friendly, detailed", "Reference-only"] as const;
 
+// Shown before a repo has been analyzed yet, or if the fetch is still loading.
+const fallbackReadme = {
+  title: "E-Commerce Platform",
+  tagline: "A modern e-commerce platform built with React, FastAPI, and PostgreSQL.",
+  overview:
+    "This service powers the storefront, checkout, and post-purchase experience. It is built for high-throughput traffic patterns and integrates payments, inventory, and analytics through a clean set of internal APIs.\n\nAutoScribe keeps this documentation in lockstep with the code. Every commit triggers an incremental analysis, and only the affected sections are rewritten so the rest of the document keeps its human-authored voice.",
+  features: [
+    "User authentication with OAuth2",
+    "Product browsing and search",
+    "Shopping cart and checkout",
+    "Payment processing with refunds",
+    "Order management and tracking",
+    "Realtime inventory sync",
+  ],
+  quickStart: "git clone https://github.com/acme/ecommerce-platform\ncd ecommerce-platform\npnpm install\npnpm dev",
+  architecture:
+    "The application is split into a React front-end, a FastAPI gateway, and domain services that own their own PostgreSQL schema. Cross-cutting concerns such as authentication and rate limiting live at the gateway.",
+  status: "Synced with code",
+  updated: "2 minutes ago",
+};
+
 function Documentation() {
-  const { docHistory } = useRepos();
+  const { repos, docHistory } = useRepos();
+  const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
+
+  const { data: readmeData } = useQuery({
+    queryKey: ["readme", repoId],
+    queryFn: async () => {
+      const res = await fetch(`/api/repos/${repoId}/documents/readme`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!repoId,
+  });
+
+  const readme = readmeData ?? fallbackReadme;
   const [templates, setTemplates] = useState<Template[]>(defaultTemplates);
   const [showTemplates, setShowTemplates] = useState(false);
   const [activeDocId, setActiveDocId] = useState("README");
@@ -127,7 +162,21 @@ function Documentation() {
 
   const explorer = (
     <div className="flex flex-col h-full min-h-0">
-      <div className="px-3 py-2.5 border-b border-border">
+      <div className="px-3 py-2.5 border-b border-border space-y-2">
+        <label className="flex items-center gap-2 h-8 px-2 rounded-md border border-border bg-surface-2 text-[12px] text-muted-foreground">
+          <span className="hidden sm:inline">Repository</span>
+          <select
+            value={repoId}
+            onChange={(e) => setRepoId(e.target.value)}
+            className="bg-transparent text-foreground text-[12px] flex-1 focus:outline-none"
+          >
+            {repos.map((r) => (
+              <option key={r.id} value={r.id} className="bg-background">
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -292,25 +341,21 @@ ${readme.tagline}
 
 ## Overview
 
-This service powers the storefront, checkout, and post-purchase experience.
-It is built for high-throughput traffic patterns and integrates payments,
-inventory, and analytics through a clean set of internal APIs.
-
-AutoScribe keeps this documentation in lockstep with the code. Every commit
-triggers an incremental analysis, and only the affected sections are rewritten.
+${readme.overview}
 
 ## Features
 
-${readme.features.map((f) => `- ${f}`).join("\n")}
+${readme.features.map((f:string) => `- ${f}`).join("\n")}
 
 ## Quick Start
 
 \`\`\`bash
-git clone https://github.com/acme/ecommerce-platform
-cd ecommerce-platform
-pnpm install
-pnpm dev
+${readme.quickStart}
 \`\`\`
+
+## Architecture
+
+${readme.architecture}
 `}
             </pre>
           ) : (
@@ -322,22 +367,15 @@ pnpm dev
 
               <section id="Overview">
                 <h2 className="text-xl font-medium text-foreground mt-8 mb-3">Overview</h2>
-                <p>
-                  This service powers the storefront, checkout, and post-purchase experience. It is
-                  built for high-throughput traffic patterns and integrates payments, inventory, and
-                  analytics through a clean set of internal APIs.
-                </p>
-                <p className="mt-4">
-                  AutoScribe keeps this documentation in lockstep with the code. Every commit
-                  triggers an incremental analysis, and only the affected sections are rewritten so
-                  the rest of the document keeps its human-authored voice.
-                </p>
+                {readme.overview.split("\n\n").map((para: string, i: number) => (
+                  <p key={i} className={i > 0 ? "mt-4" : ""}>{para}</p>
+                ))}
               </section>
 
               <section id="Features">
                 <h2 className="text-xl font-medium text-foreground mt-8 mb-3">Features</h2>
                 <ul className="space-y-2.5">
-                  {readme.features.map((f) => (
+                  {readme.features.map((f: string) => (
                     <li key={f} className="flex items-start gap-2.5">
                       <Check className="w-4 h-4 text-primary shrink-0 mt-1" /> {f}
                     </li>
@@ -348,20 +386,13 @@ pnpm dev
               <section id="Quick Start">
                 <h2 className="text-xl font-medium text-foreground mt-8 mb-3">Quick Start</h2>
                 <pre className="bg-surface-2 border border-border rounded-xl p-4 text-[13px] font-mono text-foreground/90 overflow-x-auto leading-relaxed">
-{`git clone https://github.com/acme/ecommerce-platform
-cd ecommerce-platform
-pnpm install
-pnpm dev`}
+{readme.quickStart}
                 </pre>
               </section>
 
               <section id="Architecture">
                 <h2 className="text-xl font-medium text-foreground mt-8 mb-3">Architecture</h2>
-                <p>
-                  The application is split into a React front-end, a FastAPI gateway, and domain
-                  services that own their own PostgreSQL schema. Cross-cutting concerns such as
-                  authentication and rate limiting live at the gateway.
-                </p>
+                <p>{readme.architecture}</p>
               </section>
 
               <div className="mt-10 pt-6 border-t border-border flex items-center justify-between text-[13px]">
@@ -380,7 +411,7 @@ pnpm dev`}
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 h-7 border-t border-border bg-surface-1 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5 text-success">
-          <Check className="w-3 h-3" /> Synced · 2 min ago
+          <Check className="w-3 h-3" /> {readme.status} · {readme.updated}
         </span>
         <span className="hidden sm:inline">Markdown · UTF-8 · Template: README</span>
       </div>

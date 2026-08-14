@@ -160,18 +160,18 @@ Map each table back to a mock export in `mock-data.ts` (`repositories`, `archite
 
 ## Sprint 7 — RAG chat ("Ask")
 
-**You'll learn:** Embeddings, vector similarity search, and the retrieve-then-generate pattern — the concept underneath most "chat with your code/docs" products.
+**You'll learn:** Embeddings, similarity search, and the retrieve-then-generate pattern — the concept underneath most "chat with your code/docs" products. This version skips a vector database entirely: embeddings are just JSON arrays in Postgres, and similarity search is a numpy dot-product over a few hundred rows — no new extension to install, no local model to run, nothing your machine will notice.
 
 **Build:**
-- Enable the `pgvector` extension on Postgres
-- Chunking step: split key files into reasonably sized chunks, embed each with your LLM provider's embeddings endpoint, store `(chunk_text, file_path, embedding)`
-- `POST /api/repos/{id}/ask`: embed the question → `ORDER BY embedding <-> query_embedding LIMIT k` → stuff top chunks into the LLM prompt → return an answer plus the source files it cited (matching the `flow`/`files`/`followups` shape in the conversation mock)
+- Chunking step: split a bounded set of key files (reuse `sample_files` from the structural pass) into reasonably sized text chunks
+- Embed each chunk via your LLM provider's embeddings endpoint (same OpenAI-compatible client as `services/llm.py` already uses — the embedding computation happens on their servers, not yours) and store `(repository_id, file_path, chunk_index, chunk_text, embedding)` as a JSON column
+- `POST /api/repos/{id}/ask`: embed the question → pull that repo's chunk rows → cosine similarity in Python (numpy) → take top-k → stuff those chunks into the LLM prompt → return an answer plus the source files it cited (matching the `flow`/`files`/`followups` shape in the conversation mock)
 - Persist to `chat_conversations`/`chat_messages` so history survives a refresh
 - Frontend wiring: `routes/_app.ask.tsx` — replace `conversation`/`suggestedQuestions` mocks with real calls; the suggested-questions list can itself be LLM-generated per repo once this works.
 
 **Definition of done:** Asking "where is authentication implemented?" on a real connected repo returns an answer that cites files that actually exist in that repo.
 
-**Go deeper:** Chunking strategy matters more than model choice here — read up on why naive fixed-size chunking splits functions in half and hurts retrieval quality.
+**Go deeper:** Chunking strategy matters more than model choice here — read up on why naive fixed-size chunking splits functions in half and hurts retrieval quality. This brute-force approach is fine at one-repo scale; if you ever need it to scale past a few thousand chunks, that's exactly the point where pgvector (or a dedicated vector DB) starts to earn its keep — the retrieval code above stays the same shape either way.
 
 ---
 

@@ -9,6 +9,7 @@ from app.models.pull_request import PullRequest
 from app.models.chat import ChatConversation, ChatMessage
 from app.models.activity import ActivityLog
 from app.models.session import UserSession
+from app.models.chunk import ChunkEmbedding
 
 __all__ = [
     "User",
@@ -26,4 +27,5 @@ __all__ = [
     "ChatMessage",
     "ActivityLog",
     "UserSession",
+    "ChunkEmbedding",
 ]

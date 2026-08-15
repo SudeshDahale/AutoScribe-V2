@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_model: str = "gpt-4o-mini"
     llm_embedding_model: str = "text-embedding-3-small"
+    github_webhook_secret: str = "dev-webhook-secret"
 
     @property
     def cors_origins_list(self) -> list[str]:

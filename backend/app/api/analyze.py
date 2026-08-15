@@ -11,12 +11,14 @@ from app.models import (
     User,
     GithubAccount,
     Repository,
+    RepoSettings,
     Analysis,
     Module,
     ArchitectureNode,
     ArchitectureEdge,
     Document,
     DocumentVersion,
+    PullRequest,
     ActivityLog,
 )
 from app.services.github import get_repo_tree_sync
@@ -24,6 +26,7 @@ from app.services.analysis import detect_tech_stack, detect_language_mix, bucket
 from app.services.architecture import generate_architecture
 from app.services.docs import generate_readme
 from app.services.rag import embed_repository
+from app.services.writeback import write_back_docs
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -148,6 +151,56 @@ def run_analysis(repo_id: int, token: str):
             content=json.dumps(readme_data),
             status="Synced with code",
         ))
+
+        # --- Write-back pass (Sprint 8) ---
+        # Pushes the README to GitHub per repo_settings.update_target. Isolated in
+        # its own try/except for the same reason as chat indexing below: a GitHub
+        # API hiccup here (permissions, rate limit, network) shouldn't roll back
+        # the architecture + docs work that already succeeded.
+        repo_settings = db.query(RepoSettings).filter(RepoSettings.repository_id == repo.id).first()
+        if repo_settings and repo_settings.auto_update:
+            try:
+                writeback_result = write_back_docs(token, repo, repo_settings, readme_data)
+                if writeback_result["mode"] == "pr":
+                    pr_info = writeback_result["pr"]
+                    existing_pr = (
+                        db.query(PullRequest)
+                        .filter(
+                            PullRequest.repository_id == repo.id,
+                            PullRequest.github_pr_number == pr_info["number"],
+                        )
+                        .first()
+                    )
+                    if not existing_pr:
+                        db.add(PullRequest(
+                            repository_id=repo.id,
+                            github_pr_number=pr_info["number"],
+                            title=pr_info["title"],
+                            branch=writeback_result["branch"],
+                            status="open",
+                        ))
+                    db.add(ActivityLog(
+                        repository_id=repo.id,
+                        text=f"{'Opened' if writeback_result['created'] else 'Updated'} PR #{pr_info['number']}: {pr_info['title']}"[:180],
+                        type="pr",
+                    ))
+                    repo.open_prs = (
+                        db.query(PullRequest)
+                        .filter(PullRequest.repository_id == repo.id, PullRequest.status == "open")
+                        .count()
+                    )
+                else:
+                    db.add(ActivityLog(
+                        repository_id=repo.id,
+                        text=f"Synced README to {writeback_result['branch']} ({writeback_result['mode']})"[:180],
+                        type="doc",
+                    ))
+            except Exception as exc:
+                db.add(ActivityLog(
+                    repository_id=repo.id,
+                    text=f"Doc write-back failed: {exc}"[:180],
+                    type="pr",
+                ))
 
         # --- Chat index pass (Sprint 7) ---
         # Chunks and embeds a bounded set of sample files so Ask has fresh

@@ -1,3 +1,4 @@
+import httpx
 import numpy as np
 
 from app.models.chunk import ChunkEmbedding
@@ -6,7 +7,11 @@ from app.services.chunking import chunk_files
 from app.services.github import get_file_content_sync
 from app.services.llm import generate_embeddings, generate_structured
 
-MAX_FILES_TO_CHUNK = 40
+# Kept deliberately small: each file is one GitHub API round trip, so this
+# number directly controls how long the chat-indexing pass takes. 20 files
+# is plenty of material for grounded answers without turning analysis into
+# a multi-minute wait.
+MAX_FILES_TO_CHUNK = 20
 MAX_FILE_CHARS = 20_000
 TEXT_EXTENSIONS = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rb", ".java", ".rs", ".php",
@@ -26,11 +31,15 @@ def embed_repository(db, token: str, repo, sample_files: list[str]) -> int:
     whole repo."""
     candidate_paths = [p for p in sample_files if _is_chunkable(p)][:MAX_FILES_TO_CHUNK]
 
+    # One shared client for the whole batch -- reuses a single TCP/TLS
+    # connection across every file fetch instead of paying a fresh
+    # handshake per file, which is what made this pass slow before.
     files: dict[str, str] = {}
-    for path in candidate_paths:
-        content = get_file_content_sync(token, repo.org, repo.name, path, repo.branch)
-        if content:
-            files[path] = content[:MAX_FILE_CHARS]
+    with httpx.Client(timeout=10.0) as client:
+        for path in candidate_paths:
+            content = get_file_content_sync(token, repo.org, repo.name, path, repo.branch, client=client)
+            if content:
+                files[path] = content[:MAX_FILE_CHARS]
 
     chunks = chunk_files(files)
 

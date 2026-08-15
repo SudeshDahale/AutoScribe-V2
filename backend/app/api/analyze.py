@@ -17,6 +17,7 @@ from app.models import (
     ArchitectureEdge,
     Document,
     DocumentVersion,
+    ActivityLog,
 )
 from app.services.github import get_repo_tree_sync
 from app.services.analysis import detect_tech_stack, detect_language_mix, bucket_modules
@@ -149,9 +150,22 @@ def run_analysis(repo_id: int, token: str):
         ))
 
         # --- Chat index pass (Sprint 7) ---
-        # Chunks and embeds the same bounded set of sample files, so the
-        # Ask feature has fresh, real chunks to search after every re-run.
-        embed_repository(db, token, repo, sample_files)
+        # Chunks and embeds a bounded set of sample files so Ask has fresh
+        # chunks to search after every re-run. This is intentionally
+        # isolated in its own try/except: a chat-indexing failure (a slow
+        # file fetch, a rate limit, an embeddings API hiccup) should not
+        # roll back the architecture + README work above, which already
+        # succeeded. Worst case, chat search stays unavailable for this
+        # repo until the next successful run -- everything else still
+        # completes and the repo still shows as synced.
+        try:
+            embed_repository(db, token, repo, sample_files)
+        except Exception as exc:
+            db.add(ActivityLog(
+                repository_id=repo.id,
+                text=f"Chat indexing failed: {exc}"[:180],
+                type="chat",
+            ))
 
         repo.status = "synced"
         repo.language = top_language or repo.language

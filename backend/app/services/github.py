@@ -52,7 +52,8 @@ async def list_user_repos(token: str) -> list[dict]:
         }
         for r in repos
     ]
-    
+
+
 def get_repo_tree_sync(token: str, org: str, name: str, branch: str) -> list[dict]:
     with httpx.Client() as client:
         resp = client.get(
@@ -64,11 +65,25 @@ def get_repo_tree_sync(token: str, org: str, name: str, branch: str) -> list[dic
         return resp.json().get("tree", [])
 
 
-def get_file_content_sync(token: str, org: str, name: str, path: str, branch: str) -> str | None:
+def get_file_content_sync(
+    token: str,
+    org: str,
+    name: str,
+    path: str,
+    branch: str,
+    client: httpx.Client | None = None,
+) -> str | None:
     """Fetches a single file's raw text content via the Contents API. Returns
     None for files that are binary or that fail to fetch -- callers should
-    skip those rather than crash the whole chunking pass."""
-    with httpx.Client() as client:
+    skip those rather than crash the whole chunking pass.
+
+    Accepts an optional shared `client` so callers fetching many files (see
+    services/rag.py) reuse one TCP/TLS connection instead of paying a fresh
+    handshake per file -- that repeated handshake cost, multiplied across
+    dozens of files, was the main reason indexing felt slow."""
+    owns_client = client is None
+    client = client or httpx.Client(timeout=10.0)
+    try:
         resp = client.get(
             f"{GITHUB_API}/repos/{org}/{name}/contents/{path}",
             headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
@@ -83,3 +98,8 @@ def get_file_content_sync(token: str, org: str, name: str, path: str, branch: st
             return base64.b64decode(data["content"]).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
             return None  # binary file -- not something we can chunk as text
+    except httpx.HTTPError:
+        return None  # network hiccup on one file shouldn't abort the batch
+    finally:
+        if owns_client:
+            client.close()

@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { prEvents, formatAgo, type PrEvent } from "@/lib/log-data";
+import { useQuery } from "@tanstack/react-query";
+import { formatAgo, type PrEvent } from "@/lib/log-data";
 import { useLiveTick } from "@/hooks/use-live-tick";
 import {
   GitPullRequest,
@@ -51,13 +52,58 @@ const statusIcon: Record<PrEvent["status"], React.ComponentType<{ className?: st
   draft: GitPullRequest,
 };
 
+type RepoPr = {
+  id: string;
+  repoId: string;
+  repoName: string;
+  number: number | null;
+  title: string;
+  branch: string;
+  status: "open" | "merged" | "closed";
+  createdAt: string;
+};
+
+// Real PRs only carry the fields GitHub's PR-list API gives us cheaply (title,
+// branch, status, when). additions/deletions/files/checks would need one extra
+// GitHub API call per PR -- left as sensible defaults for now rather than
+// fetching N+1 requests on every page load.
+function toPrEvent(pr: RepoPr): PrEvent & { repoId: string } {
+  const agoSec = Math.max(0, (Date.now() - new Date(pr.createdAt).getTime()) / 1000);
+  return {
+    id: pr.id,
+    repoId: pr.repoId,
+    number: pr.number ?? 0,
+    title: pr.title,
+    repo: pr.repoName,
+    branch: pr.branch,
+    author: "autoscribe[bot]",
+    status: pr.status === "open" ? "open" : pr.status,
+    additions: 0,
+    deletions: 0,
+    files: 1,
+    checks: "passing",
+    agoSec,
+  };
+}
+
 function PullRequests() {
   const elapsed = useLiveTick();
   const [filter, setFilter] = useState<"all" | PrEvent["status"]>("all");
 
+  const prQuery = useQuery({
+    queryKey: ["pull-requests"],
+    queryFn: async () => {
+      const res = await fetch("/api/pull-requests");
+      if (!res.ok) return [];
+      return (await res.json()) as RepoPr[];
+    },
+  });
+
+  const prEvents = useMemo(() => (prQuery.data ?? []).map(toPrEvent), [prQuery.data]);
+
   const rows = useMemo(
     () => (filter === "all" ? prEvents : prEvents.filter((p) => p.status === filter)),
-    [filter],
+    [filter, prEvents],
   );
 
   const totals = useMemo(
@@ -67,7 +113,7 @@ function PullRequests() {
       closed: prEvents.filter((p) => p.status === "closed").length,
       changes: prEvents.reduce((s, p) => s + p.additions + p.deletions, 0),
     }),
-    [],
+    [prEvents],
   );
 
   return (
@@ -124,6 +170,13 @@ function PullRequests() {
       </div>
 
       <section className="rounded-2xl border border-border bg-surface-1 overflow-hidden">
+        {rows.length === 0 && (
+          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+            {prQuery.isLoading
+              ? "Loading PR activity…"
+              : "No PRs yet — set a repo's update target to \"pr\" and push a commit to see one appear here."}
+          </div>
+        )}
         <ol className="divide-y divide-border">
           {rows.map((p) => {
             const Icon = statusIcon[p.status];
@@ -156,7 +209,7 @@ function PullRequests() {
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-muted-foreground">
                     <Link
                       to="/repository/$id"
-                      params={{ id: p.repo }}
+                      params={{ id: p.repoId }}
                       className="font-mono hover:text-foreground"
                     >
                       {p.repo}

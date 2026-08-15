@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime, timezone
 
 import httpx
@@ -61,3 +62,24 @@ def get_repo_tree_sync(token: str, org: str, name: str, branch: str) -> list[dic
         )
         resp.raise_for_status()
         return resp.json().get("tree", [])
+
+
+def get_file_content_sync(token: str, org: str, name: str, path: str, branch: str) -> str | None:
+    """Fetches a single file's raw text content via the Contents API. Returns
+    None for files that are binary or that fail to fetch -- callers should
+    skip those rather than crash the whole chunking pass."""
+    with httpx.Client() as client:
+        resp = client.get(
+            f"{GITHUB_API}/repos/{org}/{name}/contents/{path}",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            params={"ref": branch},
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if data.get("encoding") != "base64" or "content" not in data:
+            return None
+        try:
+            return base64.b64decode(data["content"]).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return None  # binary file -- not something we can chunk as text

@@ -44,3 +44,17 @@ def generate_structured(
 
     call = message.tool_calls[0]
     return json.loads(call.function.arguments)
+
+
+def generate_embeddings(texts: list[str], model: str | None = None) -> list[list[float]]:
+    """Embeds a batch of texts in one API call. Returned vectors are plain
+    Python lists of floats, in the same order as `texts`, so they can be
+    stored as JSON and compared with plain Python/numpy later -- no vector
+    database required."""
+    if not texts:
+        return []
+    response = _client.embeddings.create(
+        model=model or settings.llm_embedding_model,
+        input=texts,
+    )
+    return [item.embedding for item in response.data]

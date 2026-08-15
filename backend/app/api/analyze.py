@@ -22,6 +22,7 @@ from app.services.github import get_repo_tree_sync
 from app.services.analysis import detect_tech_stack, detect_language_mix, bucket_modules
 from app.services.architecture import generate_architecture
 from app.services.docs import generate_readme
+from app.services.rag import embed_repository
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -146,6 +147,11 @@ def run_analysis(repo_id: int, token: str):
             content=json.dumps(readme_data),
             status="Synced with code",
         ))
+
+        # --- Chat index pass (Sprint 7) ---
+        # Chunks and embeds the same bounded set of sample files, so the
+        # Ask feature has fresh, real chunks to search after every re-run.
+        embed_repository(db, token, repo, sample_files)
 
         repo.status = "synced"
         repo.language = top_language or repo.language

@@ -42,10 +42,21 @@ tech stack, and a short architecture summary."""
 
 def generate_readme(repo_name, tech_stack, architecture_style, modules, sample_files):
     prompt = _build_prompt(repo_name, tech_stack, architecture_style, modules, sample_files[:100])
-    return generate_structured(
+    result = generate_structured(
         system=SYSTEM_PROMPT,
         prompt=prompt,
         tool_name="report_readme",
         tool_description="Report the generated README content for this repository.",
         schema=README_TOOL_SCHEMA,
     )
+
+    # Same defensive backfill as architecture.py: not every OpenAI-compatible
+    # provider actually enforces the tool schema's "required" list, so a
+    # missing key here shouldn't KeyError deep in write-back's markdown render.
+    result.setdefault("title", repo_name)
+    result.setdefault("tagline", "")
+    result.setdefault("overview", "")
+    result.setdefault("features", [])
+    result.setdefault("quick_start", "")
+    result.setdefault("architecture", "")
+    return result

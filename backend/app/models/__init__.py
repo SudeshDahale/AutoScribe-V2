@@ -10,6 +10,7 @@ from app.models.chat import ChatConversation, ChatMessage
 from app.models.activity import ActivityLog
 from app.models.session import UserSession
 from app.models.chunk import ChunkEmbedding
+from app.models.token_usage import TokenUsage
 
 __all__ = [
     "User",
@@ -28,4 +29,5 @@ __all__ = [
     "ActivityLog",
     "UserSession",
     "ChunkEmbedding",
+    "TokenUsage",
 ]

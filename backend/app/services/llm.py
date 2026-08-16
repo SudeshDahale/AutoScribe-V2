@@ -1,3 +1,4 @@
+import contextvars
 import json
 
 from openai import OpenAI
@@ -5,6 +6,43 @@ from openai import OpenAI
 from app.core.config import settings
 
 _client = OpenAI(api_key=settings.llm_api_key, base_url=settings.llm_base_url)
+
+# Holds the currently-active UsageTracker (if any), scoped per async task/thread
+# via contextvars. This lets generate_structured/generate_embeddings record
+# tokens without every caller (architecture.py, docs.py, rag.py) having to
+# thread a tracker argument through their existing signatures.
+_active_tracker: contextvars.ContextVar["UsageTracker | None"] = contextvars.ContextVar(
+    "_active_tracker", default=None
+)
+
+
+class UsageTracker:
+    """Context manager that sums the token usage of every LLM call made
+    inside its `with` block, however deep the call chain goes.
+
+    Usage:
+        with UsageTracker() as usage:
+            generate_architecture(...)   # calls generate_structured internally
+            generate_readme(...)         # same
+        print(usage.total_tokens)
+    """
+
+    def __init__(self):
+        self.total_tokens = 0
+
+    def __enter__(self):
+        self._reset_token = _active_tracker.set(self)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _active_tracker.reset(self._reset_token)
+        return False  # never swallow exceptions
+
+
+def _record_usage(usage) -> None:
+    tracker = _active_tracker.get()
+    if tracker is not None and usage is not None:
+        tracker.total_tokens += getattr(usage, "total_tokens", 0) or 0
 
 
 def generate_structured(
@@ -37,6 +75,7 @@ def generate_structured(
         }],
         tool_choice={"type": "function", "function": {"name": tool_name}},
     )
+    _record_usage(response.usage)
 
     message = response.choices[0].message
     if not message.tool_calls:
@@ -57,4 +96,5 @@ def generate_embeddings(texts: list[str], model: str | None = None) -> list[list
         model=model or settings.llm_embedding_model,
         input=texts,
     )
+    _record_usage(response.usage)
     return [item.embedding for item in response.data]

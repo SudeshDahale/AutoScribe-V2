@@ -110,10 +110,24 @@ def generate_architecture(
     sample_files: list[str],
 ) -> dict:
     prompt = _build_prompt(repo_name, tech_stack, language_mix, directory_buckets, sample_files[:150])
-    return generate_structured(
+    result = generate_structured(
         system=SYSTEM_PROMPT,
         prompt=prompt,
         tool_name="report_architecture",
         tool_description="Report the inferred architecture graph, modules, and understanding score for this repository.",
         schema=ARCHITECTURE_TOOL_SCHEMA,
     )
+
+    # Tool-calling "required" fields aren't actually enforced by every
+    # OpenAI-compatible provider (Groq's free models in particular are
+    # looser about this than OpenAI itself), so the model can legally
+    # return valid JSON that's still missing a key our code assumes exists.
+    # Backfill anything missing rather than KeyError deep in analyze.py.
+    result.setdefault("modules", [])
+    result.setdefault("nodes", [])
+    result.setdefault("edges", [])
+    result.setdefault("tech_stack", tech_stack)
+    result.setdefault("architecture_style", [])
+    result.setdefault("understanding_score", 50)
+    result.setdefault("rationale", "Partial inference — the model omitted some fields from its response.")
+    return result

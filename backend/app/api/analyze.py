@@ -20,6 +20,7 @@ from app.models import (
     DocumentVersion,
     PullRequest,
     ActivityLog,
+    TokenUsage,
 )
 from app.services.github import get_repo_tree_sync
 from app.services.analysis import detect_tech_stack, detect_language_mix, bucket_modules
@@ -27,6 +28,7 @@ from app.services.architecture import generate_architecture
 from app.services.docs import generate_readme
 from app.services.rag import embed_repository
 from app.services.writeback import write_back_docs
+from app.services.llm import UsageTracker
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -68,6 +70,12 @@ def run_analysis(repo_id: int, token: str):
         # --- LLM pass (Sprint 5) ---
         # Feeds the LLM only what the structural pass actually found — real
         # tech stack, real directories, real file paths — not the whole repo.
+        # Everything from here through the chat-index pass is measured by one
+        # UsageTracker (entered/exited explicitly, not via `with`, so this
+        # section doesn't need re-indenting) so a single TokenUsage row
+        # captures the true cost of this analysis run (Sprint 9).
+        usage = UsageTracker()
+        usage.__enter__()
         result = generate_architecture(
             repo_name=f"{repo.org}/{repo.name}",
             tech_stack=tech_stack,
@@ -218,6 +226,15 @@ def run_analysis(repo_id: int, token: str):
                 repository_id=repo.id,
                 text=f"Chat indexing failed: {exc}"[:180],
                 type="chat",
+            ))
+
+        usage.__exit__(None, None, None)
+        if usage.total_tokens > 0:
+            db.add(TokenUsage(
+                user_id=repo.user_id,
+                repository_id=repo.id,
+                tokens=usage.total_tokens,
+                kind="analysis",
             ))
 
         repo.status = "synced"

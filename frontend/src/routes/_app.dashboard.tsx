@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { repositories, globalActivity, tokenUsage } from "@/lib/mock-data";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo } from "react";
 import {
   Plus,
   FileText,
@@ -12,7 +13,6 @@ import {
   AlertCircle,
   ArrowUpRight,
 } from "lucide-react";
-import { useMemo } from "react";
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({
@@ -34,18 +34,81 @@ const activityIcon: Record<string, React.ComponentType<{ className?: string }>> 
   detect: AlertCircle,
   pr: GitPullRequest,
   arch: Network,
+  chat: Sparkles,
 };
 
+type DashboardRepo = {
+  id: string;
+  name: string;
+  org: string;
+  docsCount: number;
+  openPRs: number;
+  understandingScore: number;
+  status: "synced" | "pending" | "analyzing";
+};
+
+type ActivityItem = {
+  id: number;
+  repoId: string | null;
+  repo: string;
+  text: string;
+  type: string;
+  time: string;
+};
+
+type DashboardData = {
+  repositories: DashboardRepo[];
+  activity: ActivityItem[];
+  tokenUsage: { plan: string; used: number; limit: number; resetsIn: string };
+  activeRepo: unknown | null;
+};
+
+function useDashboard() {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: async (): Promise<DashboardData> => {
+      const res = await fetch("/api/dashboard");
+      if (!res.ok) throw new Error("Failed to load dashboard");
+      return res.json();
+    },
+  });
+
+  // Live activity feed (Sprint 9): the backend pushes new activity_log rows
+  // over SSE as they're written by a background analysis run, so the list
+  // below updates on its own -- no polling, no manual refresh.
+  useEffect(() => {
+    const source = new EventSource("/api/activity/stream", { withCredentials: true });
+    source.onmessage = (event) => {
+      if (!event.data) return;
+      const item = JSON.parse(event.data) as ActivityItem;
+      queryClient.setQueryData<DashboardData | undefined>(["dashboard"], (old) => {
+        if (!old) return old;
+        return { ...old, activity: [item, ...old.activity].slice(0, 20) };
+      });
+    };
+    return () => source.close();
+  }, [queryClient]);
+
+  return query;
+}
+
 function Overview() {
+  const { data, isLoading } = useDashboard();
+  const repositories = data?.repositories ?? [];
+  const activity = data?.activity ?? [];
+  const tokenUsage = data?.tokenUsage ?? { plan: "Free", used: 0, limit: 250_000, resetsIn: "—" };
+
   const totals = useMemo(() => {
     const docs = repositories.reduce((s, r) => s + r.docsCount, 0);
     const prs = repositories.reduce((s, r) => s + r.openPRs, 0);
-    const avg = Math.round(
-      repositories.reduce((s, r) => s + r.understandingScore, 0) / repositories.length,
-    );
+    const avg = repositories.length
+      ? Math.round(repositories.reduce((s, r) => s + r.understandingScore, 0) / repositories.length)
+      : 0;
     const pending = repositories.filter((r) => r.status !== "synced").length;
     return { docs, prs, avg, pending };
-  }, []);
+  }, [repositories]);
 
   return (
     <div className="space-y-8">
@@ -54,7 +117,7 @@ function Overview() {
         <div>
           <h1 className="font-display text-3xl tracking-tight font-medium">Overview</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {repositories.length} connected · {totals.pending} need attention
+            {isLoading ? "Loading…" : `${repositories.length} connected · ${totals.pending} need attention`}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -102,7 +165,7 @@ function Overview() {
           icon={Activity}
           label="Avg understanding"
           value={`${totals.avg}%`}
-          hint={`${tokenUsage.plan} plan · ${(tokenUsage.used / 1000).toFixed(0)}k tokens today`}
+          hint={`${tokenUsage.plan} plan · ${(tokenUsage.used / 1000).toFixed(0)}k / ${(tokenUsage.limit / 1000).toFixed(0)}k tokens · resets in ${tokenUsage.resetsIn}`}
         />
       </section>
 
@@ -115,40 +178,55 @@ function Overview() {
               What AutoScribe has been doing across your repositories.
             </p>
           </div>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Last 24h
+          <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="relative flex w-1.5 h-1.5">
+              <span className="absolute inline-flex w-full h-full rounded-full bg-success opacity-70 animate-ping" />
+              <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-success" />
+            </span>
+            Live
           </span>
         </div>
+
+        {activity.length === 0 && (
+          <div className="mt-5 text-center text-sm text-muted-foreground py-8">
+            {isLoading
+              ? "Loading activity…"
+              : "No activity yet — connect a repository and run an analysis to see it here."}
+          </div>
+        )}
+
         <ol className="mt-5 divide-y divide-border">
-          {globalActivity.map((a, i) => {
+          {activity.map((a) => {
             const Icon = activityIcon[a.type] ?? Activity;
             return (
-              <li key={i} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+              <li key={a.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
                 <div className="w-8 h-8 rounded-lg bg-surface-2 border border-border flex items-center justify-center shrink-0 mt-0.5">
                   <Icon className="w-3.5 h-3.5 text-primary/80" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13.5px] text-foreground/90 leading-snug">{a.text}</div>
                   <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
-                    <Link
-                      to="/repository/$id"
-                      params={{ id: a.repo }}
-                      className="hover:text-foreground"
-                    >
-                      {a.repo}
-                    </Link>
+                    {a.repoId ? (
+                      <Link to="/repository/$id" params={{ id: a.repoId }} className="hover:text-foreground">
+                        {a.repo}
+                      </Link>
+                    ) : (
+                      <span>{a.repo}</span>
+                    )}
                     <span>·</span>
                     <span>{a.time}</span>
                   </div>
                 </div>
-                <Link
-                  to="/repository/$id"
-                  params={{ id: a.repo }}
-                  className="text-muted-foreground hover:text-foreground shrink-0 self-center"
-                  aria-label={`Open ${a.repo}`}
-                >
-                  <ArrowUpRight className="w-4 h-4" />
-                </Link>
+                {a.repoId && (
+                  <Link
+                    to="/repository/$id"
+                    params={{ id: a.repoId }}
+                    className="text-muted-foreground hover:text-foreground shrink-0 self-center"
+                    aria-label={`Open ${a.repo}`}
+                  >
+                    <ArrowUpRight className="w-4 h-4" />
+                  </Link>
+                )}
               </li>
             );
           })}
@@ -200,4 +278,3 @@ function KpiLink({
     </Link>
   );
 }
-

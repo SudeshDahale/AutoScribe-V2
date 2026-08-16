@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.api.auth import get_current_user
 from app.db.session import get_db
-from app.models import User, Repository, ChatConversation, ChatMessage, ActivityLog
+from app.models import User, Repository, ChatConversation, ChatMessage, ActivityLog, TokenUsage
 from app.services.rag import answer_question, suggested_questions
+from app.services.llm import UsageTracker
 
 router = APIRouter(prefix="/api", tags=["ask"])
 
@@ -77,7 +78,15 @@ def ask(repo_id: int, body: AskBody, user: User = Depends(get_current_user), db:
 
     db.add(ChatMessage(conversation_id=conversation.id, role="user", text=question))
 
-    answer = answer_question(db, repo, question)
+    with UsageTracker() as usage:
+        answer = answer_question(db, repo, question)
+    if usage.total_tokens > 0:
+        db.add(TokenUsage(
+            user_id=user.id,
+            repository_id=repo.id,
+            tokens=usage.total_tokens,
+            kind="chat",
+        ))
 
     db.add(ChatMessage(
         conversation_id=conversation.id,

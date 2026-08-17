@@ -15,6 +15,16 @@ _active_tracker: contextvars.ContextVar["UsageTracker | None"] = contextvars.Con
     "_active_tracker", default=None
 )
 
+# The system prompt used for answering developer questions — defined here (rather
+# than only in rag.py) so the streaming endpoint in ask.py can reuse it without
+# importing from rag, which would create a circular dependency.
+ANSWER_SYSTEM_PROMPT = (
+    "You are answering a developer's question about a real codebase, using only the "
+    "code excerpts provided below as context. Cite real file paths from the excerpts -- "
+    "never invent a file that isn't shown. If the excerpts don't contain enough to "
+    "answer confidently, say so rather than guessing."
+)
+
 
 class UsageTracker:
     """Context manager that sums the token usage of every LLM call made

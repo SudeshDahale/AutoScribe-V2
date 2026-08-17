@@ -50,14 +50,22 @@ def embed_repository(db, token: str, repo, sample_files: list[str]) -> int:
 
     embeddings = generate_embeddings([c["text"] for c in chunks])
 
-    for chunk, embedding in zip(chunks, embeddings):
-        db.add(ChunkEmbedding(
-            repository_id=repo.id,
-            file_path=chunk["file_path"],
-            chunk_index=chunk["chunk_index"],
-            chunk_text=chunk["text"],
-            embedding=embedding,
-        ))
+    # Bulk-insert all chunk rows in one statement instead of N separate db.add()
+    # calls -- the row-by-row approach was identified in the improvements plan
+    # (Sprint 3.2) as meaningful overhead at realistic chunk counts.
+    db.bulk_insert_mappings(
+        ChunkEmbedding,
+        [
+            {
+                "repository_id": repo.id,
+                "file_path": chunk["file_path"],
+                "chunk_index": chunk["chunk_index"],
+                "chunk_text": chunk["text"],
+                "embedding": embedding,
+            }
+            for chunk, embedding in zip(chunks, embeddings)
+        ],
+    )
 
     return len(chunks)
 
@@ -131,10 +139,7 @@ Code excerpts from the repository:
 Answer the question using only the excerpts above."""
 
 
-def answer_question(db, repo, question: str) -> dict:
-    """Embeds the question, retrieves the most similar chunks for this repo,
-    and asks the LLM to answer grounded in them. Fallback to repo modules
-    and architecture summary if vector embeddings are empty."""
+def retrieve_chunks_and_prompt(db, repo, question: str) -> tuple[list[ChunkEmbedding], str]:
     top_chunks = []
     try:
         query_embedding = generate_embeddings([question])[0]
@@ -157,6 +162,15 @@ Modules:
 {modules_text}
 
 Answer the developer's question directly based on this repository's technical architecture."""
+
+    return top_chunks, prompt
+
+
+def answer_question(db, repo, question: str) -> dict:
+    """Embeds the question, retrieves the most similar chunks for this repo,
+    and asks the LLM to answer grounded in them. Fallback to repo modules
+    and architecture summary if vector embeddings are empty."""
+    top_chunks, prompt = retrieve_chunks_and_prompt(db, repo, question)
 
     result = generate_structured(
         system=ANSWER_SYSTEM_PROMPT,

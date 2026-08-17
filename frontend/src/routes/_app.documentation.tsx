@@ -279,7 +279,7 @@ function Documentation() {
     if (!docMarkdown) return ["Overview", "Features", "Quick Start", "Architecture"];
     const matches = docMarkdown.match(/^##\s+(.+)$/gm);
     if (!matches) return ["Overview", "Features", "Quick Start", "Architecture"];
-    return matches.map((m) => m.replace(/^##\s+/, "").trim());
+    return matches.map((m: string) => m.replace(/^##\s+/, "").trim());
   }, [docMarkdown]);
 
   return (
@@ -524,7 +524,7 @@ function Documentation() {
             On this page
           </div>
           <div className="space-y-1">
-            {headingsList.map((h) => (
+            {headingsList.map((h: string) => (
               <a
                 key={h}
                 href={`#${h.replace(/[^a-zA-Z0-9]/g, "-")}`}

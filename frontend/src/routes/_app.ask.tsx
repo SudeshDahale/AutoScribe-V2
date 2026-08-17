@@ -167,7 +167,7 @@ function Ask() {
     },
     onSuccess: () => {
       setPendingQuestion(null);
-      queryClient.invalidateQueries({ queryKey: ["conversation", repoId] });
+      queryClient.invalidateQueries({ queryKey: ["conversation", repoId || ""] });
     },
     onError: () => setPendingQuestion(null),
   });

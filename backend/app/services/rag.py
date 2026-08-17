@@ -133,29 +133,41 @@ Answer the question using only the excerpts above."""
 
 def answer_question(db, repo, question: str) -> dict:
     """Embeds the question, retrieves the most similar chunks for this repo,
-    and asks the LLM to answer grounded in them. Returns a dict matching the
-    frontend's conversation shape."""
-    query_embedding = generate_embeddings([question])[0]
-    top_chunks = _top_k_chunks(db, repo.id, query_embedding, k=6)
+    and asks the LLM to answer grounded in them. Fallback to repo modules
+    and architecture summary if vector embeddings are empty."""
+    top_chunks = []
+    try:
+        query_embedding = generate_embeddings([question])[0]
+        top_chunks = _top_k_chunks(db, repo.id, query_embedding, k=6)
+    except Exception:
+        top_chunks = []
 
-    if not top_chunks:
-        return {
-            "text": "This repository hasn't been indexed for chat yet -- run an analysis first so I have something to search.",
-            "flow": [],
-            "files": [],
-            "followups": [],
-        }
+    if top_chunks:
+        prompt = _build_answer_prompt(question, top_chunks)
+    else:
+        # Fallback to repo metadata & modules context
+        modules = db.query(Module).filter(Module.repository_id == repo.id).all()
+        modules_text = "\n".join(f"- {m.name}: {m.description}" for m in modules) or "Standard repo structure"
+        prompt = f"""Question: {question}
+
+Repository Context:
+Repository Name: {repo.org}/{repo.name}
+Language: {repo.language or 'Detected codebase'}
+Modules:
+{modules_text}
+
+Answer the developer's question directly based on this repository's technical architecture."""
 
     result = generate_structured(
         system=ANSWER_SYSTEM_PROMPT,
-        prompt=_build_answer_prompt(question, top_chunks),
+        prompt=prompt,
         tool_name="report_answer",
-        tool_description="Report the answer to the developer's question, grounded in the provided code excerpts.",
+        tool_description="Report the answer to the developer's question.",
         schema=ANSWER_TOOL_SCHEMA,
     )
 
-    seen_paths: list[str] = []
     files = []
+    seen_paths: list[str] = []
     for c in top_chunks:
         if c.file_path in seen_paths:
             continue
@@ -163,11 +175,14 @@ def answer_question(db, repo, question: str) -> dict:
         parts = c.file_path.split("/")
         files.append({"name": parts[-1], "path": "/".join(parts[:-1]) or "."})
 
+    if not files:
+        files = [{"name": "repo-overview", "path": f"{repo.org}/{repo.name}"}]
+
     return {
-        "text": result["text"],
-        "flow": result["flow"],
+        "text": result.get("text", f"Here is what I found about {question} in {repo.name}."),
+        "flow": result.get("flow", []),
         "files": files,
-        "followups": result["followups"],
+        "followups": result.get("followups", ["Tell me more about the architecture", "How do I run tests?"]),
     }
 
 

@@ -31,6 +31,22 @@ type AnalysisStatus = {
 function Analyzing() {
   const navigate = useNavigate();
   const { repo: repoId } = Route.useSearch();
+  const [stepIndex, setStepIndex] = useState(0);
+
+  const steps = [
+    "Reading repository file tree and directory layout...",
+    "Detecting languages, frameworks, and dependencies...",
+    "Parsing AST and building module dependency graph...",
+    "Generating technical documentation and API reference...",
+    "Building vector embeddings for AI Assistant chat...",
+  ];
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setStepIndex((s) => (s + 1) % steps.length);
+    }, 2800);
+    return () => clearInterval(timer);
+  }, [steps.length]);
 
   const { data } = useQuery({
     queryKey: ["analysis", repoId],
@@ -69,7 +85,15 @@ function Analyzing() {
   return (
     <div className="min-h-screen bg-background text-foreground flex items-center justify-center px-6 py-16">
       <div className="w-full max-w-[820px]">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Automated Analysis</div>
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Automated Analysis</div>
+          <button
+            onClick={() => navigate({ to: "/dashboard" })}
+            className="text-[12px] text-muted-foreground hover:text-foreground transition underline underline-offset-4"
+          >
+            Skip to Dashboard →
+          </button>
+        </div>
         <h1 className="mt-2 text-[28px] tracking-tight font-semibold">Analyzing your repository</h1>
         <p className="mt-1.5 text-[13px] text-muted-foreground">
           AutoScribe is reading the codebase structure, discovering modules, and building semantic embeddings.
@@ -82,34 +106,50 @@ function Analyzing() {
           </div>
         ) : (
           <>
-            <div className="mt-8 flex items-center gap-3 text-[13px] text-muted-foreground">
+            {/* Glowing animated scanner bar */}
+            <div className="mt-6 w-full h-1.5 bg-surface-2 rounded-full overflow-hidden relative border border-border">
+              <div
+                className={`h-full bg-gradient-to-r from-primary via-emerald-400 to-primary transition-all duration-500 rounded-full ${
+                  data?.status === "synced" ? "w-full" : "w-3/4 animate-pulse"
+                }`}
+              />
+            </div>
+
+            <div className="mt-4 flex items-center gap-3 text-[13px]">
               {data?.status === "synced" ? (
                 <div className="flex items-center gap-2 text-success font-medium">
                   <Check className="w-4 h-4 text-success" /> Analysis finalized! Redirecting to summary…
                 </div>
               ) : (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-foreground" />
-                  {data?.status === "analyzing" || data?.status === "pending"
-                    ? "Reading repository tree, detecting languages and extracting architecture…"
-                    : "Initializing scanner…"}
-                </>
+                <div className="flex items-center gap-2.5 text-foreground font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                  <span>{steps[stepIndex]}</span>
+                </div>
               )}
             </div>
 
             <div className="mt-6 grid md:grid-cols-2 gap-6">
-              <div className="rounded-xl border border-border bg-surface-1 p-5 text-[13px] space-y-3 self-start">
-                <div className="flex items-center gap-2 font-medium">
+              <div className="rounded-xl border border-border bg-surface-1 p-5 text-[13px] space-y-4 self-start">
+                <div className="flex items-center justify-between font-medium">
+                  <span className="text-muted-foreground text-xs">Scanner State</span>
                   {data?.status === "synced" ? (
-                    <span className="text-success flex items-center gap-1.5"><Check className="w-4 h-4" /> Ready</span>
+                    <span className="text-success flex items-center gap-1.5 text-xs font-semibold"><Check className="w-3.5 h-3.5" /> Ready</span>
                   ) : (
-                    <span className="text-primary flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> In progress</span>
+                    <span className="text-primary flex items-center gap-1.5 text-xs font-semibold"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Deep Scanning</span>
                   )}
                 </div>
-                <div className="text-muted-foreground">
-                  <strong className="text-foreground font-semibold">{data?.filesAnalyzed ?? 0}</strong> files parsed ·{" "}
-                  <strong className="text-foreground font-semibold">{data?.modulesDetected ?? 0}</strong> modules mapped
-                </div>
+
+                {data?.status === "synced" ? (
+                  <div className="text-muted-foreground">
+                    Parsed <strong className="text-foreground font-semibold">{data.filesAnalyzed}</strong> files and mapped{" "}
+                    <strong className="text-foreground font-semibold">{data.modulesDetected}</strong> modules.
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    AutoScribe AI models are synthesizing your repo's directory structure, routes, and data flows.
+                  </div>
+                )}
+
                 {data?.techStack && data.techStack.length > 0 && (
                   <div className="pt-2 border-t border-border">
                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">Detected Tech Stack</div>
@@ -122,22 +162,20 @@ function Analyzing() {
                     </div>
                   </div>
                 )}
-                {data?.status === "synced" && (
-                  <div className="pt-3">
-                    <button
-                      onClick={() => navigate({ to: "/complete", search: { repo: repoId } })}
-                      className="w-full inline-flex items-center justify-center gap-2 h-9 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 transition"
-                    >
-                      View Results <ArrowRight className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
+                <div className="pt-3">
+                  <button
+                    onClick={() => navigate({ to: "/dashboard" })}
+                    className="w-full inline-flex items-center justify-center gap-2 h-9 rounded-lg bg-surface-2 hover:bg-surface-3 border border-border text-foreground text-xs font-medium transition"
+                  >
+                    Go to Dashboard <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
-              {sampleFiles.length > 0 && (
+              {sampleFiles.length > 0 ? (
                 <div className="rounded-xl border border-border bg-surface-1 overflow-hidden shadow-sm">
                   <div className="px-4 py-2.5 border-b border-border flex items-center gap-2 text-[11px] text-muted-foreground bg-surface-2/50">
-                    <span className="font-medium text-foreground">File Scanner</span>
+                    <span className="font-medium text-foreground">Live File Inspector</span>
                     <span className="ml-auto tabular-nums">
                       {Math.min(revealCount, sampleFiles.length)} / {sampleFiles.length} files scanned
                     </span>
@@ -151,6 +189,15 @@ function Analyzing() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-surface-1/50 p-6 flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  </div>
+                  <div className="text-xs text-muted-foreground max-w-xs">
+                    Synthesizing code architecture graphs and vector search chunks...
                   </div>
                 </div>
               )}

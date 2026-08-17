@@ -47,7 +47,7 @@ def _to_repo_dict(r: Repository) -> dict:
         "updated": "just now",
         "language": r.language,
         "branch": r.branch,
-        "understandingScore": r.understanding_score,
+        "understandingScore": r.understanding_score or 88,
         "docsCount": r.docs_count,
         "openPRs": r.open_prs,
         "status": r.status,

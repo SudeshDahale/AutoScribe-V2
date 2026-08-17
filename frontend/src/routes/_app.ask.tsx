@@ -39,6 +39,7 @@ function Ask() {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -106,22 +107,35 @@ function Ask() {
     setPendingQuestion(null);
   }
 
+  function copyText(text: string, idx: number) {
+    navigator.clipboard.writeText(text);
+    setCopiedIdx(idx);
+    setTimeout(() => setCopiedIdx(null), 2000);
+  }
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-6 max-w-5xl mx-auto">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
         <div>
-          <h1 className="font-display text-3xl tracking-tight font-medium">Ask AI</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Ask anything about your codebase</p>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-2xl tracking-tight font-semibold">AutoScribe AI Chat</h1>
+            <span className="px-2 py-0.5 text-[10px] rounded-full bg-primary/10 border border-primary/30 text-primary font-medium">
+              v2.0 Vector RAG
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Ask technical questions about your codebase, architecture flows, and APIs.
+          </p>
         </div>
 
         {repos.length > 0 && (
-          <label className="flex items-center gap-2 h-9 pl-3 pr-2 rounded-lg border border-border bg-surface-1 text-sm">
-            <span className="text-muted-foreground text-xs hidden sm:inline">Repository</span>
+          <label className="flex items-center gap-2 h-9 pl-3 pr-2 rounded-xl border border-border bg-surface-1 text-xs shadow-sm">
+            <span className="text-muted-foreground text-xs hidden sm:inline">Active Context:</span>
             <div className="relative flex items-center">
               <select
                 value={repoId}
                 onChange={(e) => handleRepoChange(e.target.value)}
-                className="appearance-none bg-transparent text-foreground text-sm pr-5 focus:outline-none cursor-pointer"
+                className="appearance-none bg-transparent text-foreground font-medium text-xs pr-5 focus:outline-none cursor-pointer"
               >
                 {repos.map((r) => (
                   <option key={r.id} value={r.id} className="bg-background">
@@ -136,7 +150,7 @@ function Ask() {
       </div>
 
       {repos.length === 0 ? (
-        <div className="text-sm text-muted-foreground text-center py-12 rounded-2xl border border-dashed border-border">
+        <div className="text-sm text-muted-foreground text-center py-16 rounded-2xl border border-dashed border-border bg-surface-1/50">
           Connect a repository first to start asking questions about it.
         </div>
       ) : (
@@ -149,13 +163,13 @@ function Ask() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleAsk(input);
               }}
-              placeholder={activeRepo ? `Ask anything about ${activeRepo.name}...` : "Ask anything about your codebase..."}
-              className="w-full h-14 pl-11 pr-14 rounded-2xl bg-surface-1 border border-border text-[15px] placeholder:text-muted-foreground/70 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/30 transition"
+              placeholder={activeRepo ? `Ask anything about ${activeRepo.name} codebase...` : "Ask a technical question..."}
+              className="w-full h-12 pl-11 pr-14 rounded-xl bg-surface-1 border border-border text-[14px] placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition shadow-sm"
             />
             <button
               onClick={() => handleAsk(input)}
-              disabled={askMutation.isPending}
-              className="absolute right-2 top-1/2 -translate-y-1/2 h-10 w-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:brightness-95 transition disabled:opacity-50"
+              disabled={askMutation.isPending || !input.trim()}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:brightness-95 transition disabled:opacity-40"
             >
               {askMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             </button>
@@ -166,56 +180,72 @@ function Ask() {
               <button
                 key={q}
                 onClick={() => handleAsk(q)}
-                className="text-xs px-3 py-1.5 rounded-full bg-surface-1 border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 transition"
+                className="text-xs px-3 py-1.5 rounded-lg bg-surface-1 border border-border text-muted-foreground hover:text-foreground hover:bg-surface-2 hover:border-primary/30 transition shadow-xs"
               >
-                {q}
+                💡 {q}
               </button>
             ))}
           </div>
 
           {/* Conversation */}
-          <div className="space-y-6 pt-4">
+          <div className="space-y-6 pt-2">
             {messages.length === 0 && !pendingQuestion && (
-              <div className="text-sm text-muted-foreground text-center py-12">
-                Ask a question above to get started.
+              <div className="text-center py-16 rounded-2xl border border-dashed border-border/80 bg-surface-1/30 space-y-3">
+                <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+                  <FileCode className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-medium text-foreground">Ready to explore your codebase</h3>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                  Ask questions about authentication, endpoints, database schemas, or code architecture.
+                </p>
               </div>
             )}
 
             {messages.map((msg, idx) =>
               msg.role === "user" ? (
                 <div key={idx} className="flex justify-end">
-                  <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-surface-2 border border-border px-4 py-3 text-sm">
+                  <div className="max-w-[80%] rounded-2xl rounded-tr-xs bg-primary text-primary-foreground px-4 py-3 text-sm font-medium shadow-sm">
                     {msg.text}
                   </div>
                 </div>
               ) : (
-                <div key={idx} className="rounded-2xl border border-border bg-surface-1 p-6 space-y-6">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0">
-                      <div className="w-2.5 h-2.5 rounded-sm bg-primary rotate-45" />
+                <div key={idx} className="rounded-2xl border border-border bg-surface-1 p-5 md:p-6 space-y-5 shadow-xs">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary font-bold text-xs">
+                        AS
+                      </div>
+                      <div>
+                        <div className="text-xs font-semibold text-foreground">AutoScribe AI</div>
+                        <div className="text-[10px] text-muted-foreground">Grounded answer</div>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <div className="text-xs text-muted-foreground">AI Response</div>
-                      <div
-                        className="mt-2 text-[15px] leading-relaxed text-foreground/95"
-                        dangerouslySetInnerHTML={{
-                          __html: msg.text.replace(/\*\*(.*?)\*\*/g, '<span class="text-primary">$1</span>'),
-                        }}
-                      />
-                    </div>
+
+                    <button
+                      onClick={() => copyText(msg.text, idx)}
+                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded bg-surface-2 border border-border transition"
+                    >
+                      {copiedIdx === idx ? "✓ Copied" : "Copy"}
+                    </button>
+                  </div>
+
+                  <div className="text-[14px] leading-relaxed text-foreground/90 whitespace-pre-wrap font-sans">
+                    {msg.text}
                   </div>
 
                   {msg.flow.length > 0 && (
-                    <div className="rounded-xl bg-surface-2/60 border border-border p-4">
-                      <div className="text-xs text-muted-foreground mb-3">Architecture flow</div>
-                      <div className="flex items-center gap-2 overflow-x-auto">
+                    <div className="rounded-xl bg-surface-2/70 border border-border p-4">
+                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2.5">
+                        Architecture Flow
+                      </div>
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
                         {msg.flow.map((f, i) => (
                           <div key={f.label + i} className="flex items-center gap-2 shrink-0">
-                            <div className="px-3 py-2 rounded-lg bg-surface-3 border border-border">
-                              <div className="text-sm">{f.label}</div>
+                            <div className="px-3 py-2 rounded-lg bg-surface-1 border border-border">
+                              <div className="text-xs font-medium text-foreground">{f.label}</div>
                               <div className="text-[10px] text-muted-foreground">({f.meta})</div>
                             </div>
-                            {i < msg.flow.length - 1 && <ArrowRight className="w-4 h-4 text-muted-foreground" />}
+                            {i < msg.flow.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                           </div>
                         ))}
                       </div>
@@ -224,19 +254,20 @@ function Ask() {
 
                   {msg.files.length > 0 && (
                     <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="text-xs text-muted-foreground">Related Files ({msg.files.length})</div>
-                        <div className="flex gap-1.5">
-                          <button className="p-1.5 rounded-md hover:bg-surface-2 text-muted-foreground hover:text-foreground"><ThumbsUp className="w-3.5 h-3.5" /></button>
-                          <button className="p-1.5 rounded-md hover:bg-surface-2 text-muted-foreground hover:text-foreground"><ThumbsDown className="w-3.5 h-3.5" /></button>
-                        </div>
+                      <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2.5">
+                        Source Files Referenced ({msg.files.length})
                       </div>
-                      <div className="grid grid-cols-5 gap-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
                         {msg.files.map((f, i) => (
-                          <div key={f.name + i} className="p-3 rounded-xl bg-surface-2 border border-border hover:border-primary/30 transition cursor-pointer">
-                            <FileCode className="w-4 h-4 text-primary/80 mb-2" />
-                            <div className="text-xs font-medium truncate">{f.name}</div>
-                            <div className="text-[10px] text-muted-foreground truncate">{f.path}</div>
+                          <div
+                            key={f.name + i}
+                            className="p-2.5 rounded-lg bg-surface-2 border border-border hover:border-primary/40 transition flex items-center gap-2.5 text-left"
+                          >
+                            <FileCode className="w-4 h-4 text-primary shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-medium truncate text-foreground">{f.name}</div>
+                              <div className="text-[10px] text-muted-foreground truncate">{f.path}</div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -244,16 +275,16 @@ function Ask() {
                   )}
 
                   {msg.followups.length > 0 && (
-                    <div>
-                      <div className="text-xs text-muted-foreground mb-2">Suggested follow-ups</div>
+                    <div className="pt-2 border-t border-border/60">
+                      <div className="text-[11px] font-medium text-muted-foreground mb-2">Suggested follow-ups:</div>
                       <div className="flex flex-wrap gap-2">
                         {msg.followups.map((q) => (
                           <button
                             key={q}
                             onClick={() => handleAsk(q)}
-                            className="text-xs px-3 py-1.5 rounded-full bg-surface-2 border border-border hover:border-primary/40 transition"
+                            className="text-xs px-3 py-1 rounded-full bg-surface-2 border border-border hover:border-primary/40 transition text-foreground/80 hover:text-foreground"
                           >
-                            {q}
+                            {q} →
                           </button>
                         ))}
                       </div>
@@ -266,13 +297,13 @@ function Ask() {
             {pendingQuestion && (
               <>
                 <div className="flex justify-end">
-                  <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-surface-2 border border-border px-4 py-3 text-sm">
+                  <div className="max-w-[80%] rounded-2xl rounded-tr-xs bg-primary text-primary-foreground px-4 py-3 text-sm font-medium">
                     {pendingQuestion}
                   </div>
                 </div>
-                <div className="rounded-2xl border border-border bg-surface-1 p-6 flex items-center gap-3 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Thinking through the codebase...
+                <div className="rounded-2xl border border-border bg-surface-1 p-5 flex items-center gap-3 text-sm text-muted-foreground shadow-xs">
+                  <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
+                  Analyzing vector embeddings & generating architectural response...
                 </div>
               </>
             )}

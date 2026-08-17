@@ -111,12 +111,14 @@ SYSTEM_PROMPT = (
 )
 
 
-def _build_context(repo_name, tech_stack, architecture_style, modules, sample_files):
+def _build_context(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text: str = "", preferences: dict = None):
     modules_text = "\n".join(f"- {m['name']}: {m.get('description', '')}" for m in modules) or "none detected"
+    ref_block = f"\nUser Provided Reference Document / Context:\n{reference_text.strip()}\n" if reference_text and reference_text.strip() else ""
+    pref_block = f"\nUser Preferences Tone/Style: {preferences.get('tone', 'default')}\n" if preferences and isinstance(preferences, dict) else ""
     return f"""Repository: {repo_name}
 Tech stack: {", ".join(tech_stack) or "none detected"}
 Architecture style: {", ".join(architecture_style) or "unknown"}
-
+{ref_block}{pref_block}
 Modules detected:
 {modules_text}
 
@@ -124,8 +126,8 @@ Sample of real file paths ({len(sample_files)} shown):
 {chr(10).join(sample_files[:120])}"""
 
 
-def generate_readme(repo_name, tech_stack, architecture_style, modules, sample_files):
-    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files)
+def generate_readme(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text: str = "", preferences: dict = None):
+    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text, preferences)
     prompt = f"""{ctx}
 
 Write a comprehensive README for this repository: title, one-line tagline, overview, grounded features, quick-start setup commands, and architecture summary."""
@@ -145,8 +147,8 @@ Write a comprehensive README for this repository: title, one-line tagline, overv
     return result
 
 
-def generate_api_reference(repo_name, tech_stack, architecture_style, modules, sample_files):
-    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files)
+def generate_api_reference(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text: str = "", preferences: dict = None):
+    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text, preferences)
     prompt = f"""{ctx}
 
 Write an API Reference for this repository based on its detected routes and services. Detail the endpoints, parameter formats, response structures, and HTTP error codes."""
@@ -166,8 +168,8 @@ Write an API Reference for this repository based on its detected routes and serv
     return result
 
 
-def generate_architecture_doc(repo_name, tech_stack, architecture_style, modules, sample_files):
-    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files)
+def generate_architecture_doc(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text: str = "", preferences: dict = None):
+    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text, preferences)
     prompt = f"""{ctx}
 
 Write a detailed Technical Architecture Guide for this repository. Detail the system layers, component interactions, data pipelines, key design decisions, and scalability considerations."""
@@ -187,8 +189,8 @@ Write a detailed Technical Architecture Guide for this repository. Detail the sy
     return result
 
 
-def generate_runbook(repo_name, tech_stack, architecture_style, modules, sample_files):
-    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files)
+def generate_runbook(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text: str = "", preferences: dict = None):
+    ctx = _build_context(repo_name, tech_stack, architecture_style, modules, sample_files, reference_text, preferences)
     prompt = f"""{ctx}
 
 Write a Developer Runbook for this repository: development setup prerequisites, environment variable configuration, local dev loop, test commands, and troubleshooting guide."""

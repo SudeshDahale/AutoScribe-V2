@@ -153,10 +153,19 @@ def get_document_by_slug(repo_id: int, slug: str, user: User = Depends(get_curre
     }
 
 
+from pydantic import BaseModel
+
+
+class RegenerateRequest(BaseModel):
+    reference_text: str | None = None
+    preferences: dict | None = None
+
+
 @router.post("/repos/{repo_id}/documents/{slug}/regenerate")
 def regenerate_document(
     repo_id: int,
     slug: str,
+    body: RegenerateRequest | None = None,
     user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
@@ -184,12 +193,17 @@ def regenerate_document(
         raise HTTPException(status_code=400, detail=f"Unsupported document slug: {slug}")
 
     title, section, gen_fn = gen_map[slug]
+    ref_text = body.reference_text if body else ""
+    prefs = body.preferences if body else None
+
     doc_data = gen_fn(
         repo_name=f"{repo.org}/{repo.name}",
         tech_stack=tech_stack,
         architecture_style=arch_style,
         modules=modules,
         sample_files=sample_files,
+        reference_text=ref_text or "",
+        preferences=prefs,
     )
 
     doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()

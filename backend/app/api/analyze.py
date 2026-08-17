@@ -75,19 +75,17 @@ def run_analysis(repo_id: int, token: str):
         # --- LLM pass (Sprint 5) ---
         # Feeds the LLM only what the structural pass actually found — real
         # tech stack, real directories, real file paths — not the whole repo.
-        # Everything from here through the chat-index pass is measured by one
-        # UsageTracker (entered/exited explicitly, not via `with`, so this
-        # section doesn't need re-indenting) so a single TokenUsage row
-        # captures the true cost of this analysis run (Sprint 9).
-        usage = UsageTracker()
-        usage.__enter__()
-        result = generate_architecture(
-            repo_name=f"{repo.org}/{repo.name}",
-            tech_stack=tech_stack,
-            language_mix=language_mix,
-            directory_buckets=directory_buckets,
-            sample_files=sample_files,
-        )
+        total_tokens = 0
+
+        with UsageTracker() as arch_usage:
+            result = generate_architecture(
+                repo_name=f"{repo.org}/{repo.name}",
+                tech_stack=tech_stack,
+                language_mix=language_mix,
+                directory_buckets=directory_buckets,
+                sample_files=sample_files,
+            )
+        total_tokens += arch_usage.total_tokens
 
         # Replace modules with the LLM's richer descriptions (Sprint 4's
         # `directory_buckets` were only ever meant as the LLM's raw material).
@@ -149,28 +147,30 @@ def run_analysis(repo_id: int, token: str):
         ]
 
         readme_data = None
-        for title, section, slug, gen_fn in doc_specs:
-            doc_data = gen_fn(
-                repo_name=f"{repo.org}/{repo.name}",
-                tech_stack=result["tech_stack"] or tech_stack,
-                architecture_style=result["architecture_style"],
-                modules=result["modules"],
-                sample_files=sample_files,
-            )
-            if slug == "readme":
-                readme_data = doc_data
+        with UsageTracker() as docs_usage:
+            for title, section, slug, gen_fn in doc_specs:
+                doc_data = gen_fn(
+                    repo_name=f"{repo.org}/{repo.name}",
+                    tech_stack=result["tech_stack"] or tech_stack,
+                    architecture_style=result["architecture_style"],
+                    modules=result["modules"],
+                    sample_files=sample_files,
+                )
+                if slug == "readme":
+                    readme_data = doc_data
 
-            doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()
-            if not doc:
-                doc = Document(repository_id=repo.id, title=title, section=section, slug=slug)
-                db.add(doc)
-                db.flush()
+                doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()
+                if not doc:
+                    doc = Document(repository_id=repo.id, title=title, section=section, slug=slug)
+                    db.add(doc)
+                    db.flush()
 
-            db.add(DocumentVersion(
-                document_id=doc.id,
-                content=json.dumps(doc_data),
-                status="Synced with code",
-            ))
+                db.add(DocumentVersion(
+                    document_id=doc.id,
+                    content=json.dumps(doc_data),
+                    status="Synced with code",
+                ))
+        total_tokens += docs_usage.total_tokens
 
         # --- Write-back pass (Sprint 8) ---
         # Pushes the README to GitHub per repo_settings.update_target. Isolated in
@@ -232,7 +232,9 @@ def run_analysis(repo_id: int, token: str):
         # repo until the next successful run -- everything else still
         # completes and the repo still shows as synced.
         try:
-            embed_repository(db, token, repo, sample_files)
+            with UsageTracker() as rag_usage:
+                embed_repository(db, token, repo, sample_files)
+            total_tokens += rag_usage.total_tokens
         except Exception as exc:
             db.add(ActivityLog(
                 repository_id=repo.id,
@@ -240,12 +242,11 @@ def run_analysis(repo_id: int, token: str):
                 type="chat",
             ))
 
-        usage.__exit__(None, None, None)
-        if usage.total_tokens > 0:
+        if total_tokens > 0:
             db.add(TokenUsage(
                 user_id=repo.user_id,
                 repository_id=repo.id,
-                tokens=usage.total_tokens,
+                tokens=total_tokens,
                 kind="analysis",
             ))
 

@@ -25,7 +25,12 @@ from app.models import (
 from app.services.github import get_repo_tree_sync
 from app.services.analysis import detect_tech_stack, detect_language_mix, bucket_modules
 from app.services.architecture import generate_architecture
-from app.services.docs import generate_readme
+from app.services.docs import (
+    generate_readme,
+    generate_api_reference,
+    generate_architecture_doc,
+    generate_runbook,
+)
 from app.services.rag import embed_repository
 from app.services.writeback import write_back_docs
 from app.services.llm import UsageTracker
@@ -134,31 +139,38 @@ def run_analysis(repo_id: int, token: str):
         analysis.sample_files = sample_files
         analysis.completed_at = datetime.now(timezone.utc)
 
-        # --- Documentation pass (Sprint 6) ---
-        # Feeds the LLM only what the earlier passes actually found, same
-        # discipline as the architecture pass — no re-reading the whole repo.
-        readme_data = generate_readme(
-            repo_name=f"{repo.org}/{repo.name}",
-            tech_stack=result["tech_stack"] or tech_stack,
-            architecture_style=result["architecture_style"],
-            modules=result["modules"],
-            sample_files=sample_files,
-        )
+        # --- Documentation pass (Sprint 6 & 10) ---
+        # Generate full doc suite: README, API Reference, Architecture Guide, Developer Runbook
+        doc_specs = [
+            ("README", "Getting Started", "readme", generate_readme),
+            ("API Reference", "API & Interfaces", "api-reference", generate_api_reference),
+            ("Architecture Guide", "Architecture", "architecture-guide", generate_architecture_doc),
+            ("Developer Runbook", "Operations", "developer-runbook", generate_runbook),
+        ]
 
-        doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == "readme").first()
-        if not doc:
-            doc = Document(repository_id=repo.id, title="README", section="Getting Started", slug="readme")
-            db.add(doc)
-            db.flush()  # need doc.id before the version can reference it
+        readme_data = None
+        for title, section, slug, gen_fn in doc_specs:
+            doc_data = gen_fn(
+                repo_name=f"{repo.org}/{repo.name}",
+                tech_stack=result["tech_stack"] or tech_stack,
+                architecture_style=result["architecture_style"],
+                modules=result["modules"],
+                sample_files=sample_files,
+            )
+            if slug == "readme":
+                readme_data = doc_data
 
-        # Every regeneration is a NEW row, never an overwrite — that's what
-        # makes the Documents Log a real diff-able history instead of a
-        # single mutable blob.
-        db.add(DocumentVersion(
-            document_id=doc.id,
-            content=json.dumps(readme_data),
-            status="Synced with code",
-        ))
+            doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()
+            if not doc:
+                doc = Document(repository_id=repo.id, title=title, section=section, slug=slug)
+                db.add(doc)
+                db.flush()
+
+            db.add(DocumentVersion(
+                document_id=doc.id,
+                content=json.dumps(doc_data),
+                status="Synced with code",
+            ))
 
         # --- Write-back pass (Sprint 8) ---
         # Pushes the README to GitHub per repo_settings.update_target. Isolated in

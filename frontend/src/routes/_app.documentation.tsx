@@ -106,24 +106,51 @@ const fallbackReadme = {
   updated: "2 minutes ago",
 };
 
-function Documentation() {
-  const { repos, docHistory } = useRepos();
-  const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
+function docIdToSlug(id: string): string {
+  const lower = id.toLowerCase();
+  if (lower.includes("api")) return "api-reference";
+  if (lower.includes("arch")) return "architecture-guide";
+  if (lower.includes("runbook") || lower.includes("op")) return "developer-runbook";
+  return "readme";
+}
 
-  const { data: readmeData } = useQuery({
-    queryKey: ["readme", repoId],
+function Documentation() {
+  const { repos } = useRepos();
+  const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
+  const [activeDocId, setActiveDocId] = useState("README");
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const activeSlug = docIdToSlug(activeDocId);
+
+  const { data: currentDoc, refetch: refetchDoc, isLoading: isDocLoading } = useQuery({
+    queryKey: ["document", repoId, activeSlug],
     queryFn: async () => {
-      const res = await fetch(`/api/repos/${repoId}/documents/readme`);
+      const res = await fetch(`/api/repos/${repoId}/documents/by-slug/${activeSlug}`);
       if (!res.ok) return null;
       return res.json();
     },
-    enabled: !!repoId,
+    enabled: !!repoId && !!activeSlug,
   });
 
-  const readme = readmeData ?? fallbackReadme;
+  const handleRegenerate = async () => {
+    if (!repoId || !activeSlug) return;
+    setIsRegenerating(true);
+    try {
+      const res = await fetch(`/api/repos/${repoId}/documents/${activeSlug}/regenerate`, { method: "POST" });
+      if (res.ok) {
+        await refetchDoc();
+      }
+    } catch (e) {
+      console.error("Regeneration failed", e);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
+  const readme = currentDoc?.content && activeSlug === "readme" ? currentDoc.content : fallbackReadme;
+  const docMarkdown = currentDoc?.markdown || "";
   const [templates, setTemplates] = useState<Template[]>(defaultTemplates);
   const [showTemplates, setShowTemplates] = useState(false);
-  const [activeDocId, setActiveDocId] = useState("README");
   const [query, setQuery] = useState("");
   const [openSection, setOpenSection] = useState<string | null>("Getting Started");
   const [fontSize, setFontSize] = useState<"sm" | "md" | "lg">("md");
@@ -320,6 +347,15 @@ function Documentation() {
             ))}
           </div>
           <button
+            onClick={handleRegenerate}
+            disabled={isRegenerating}
+            className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md bg-primary text-primary-foreground text-[11.5px] font-medium hover:brightness-95 disabled:opacity-50 transition"
+            title="Re-run LLM generator for this document"
+          >
+            <Sparkles className={`w-3 h-3 ${isRegenerating ? "animate-spin" : ""}`} />
+            <span>{isRegenerating ? "Regenerating..." : "Regenerate"}</span>
+          </button>
+          <button
             onClick={() => setFullscreen((v) => !v)}
             className="inline-flex items-center gap-1.5 px-2 h-7 rounded-md border border-border bg-surface-1 hover:text-foreground hover:bg-surface-2 transition"
             title={fullscreen ? "Exit full screen (Esc)" : "Full screen"}
@@ -333,52 +369,22 @@ function Documentation() {
       {/* Document body */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-[800px] px-6 py-8">
-          {activeDocId !== "README" ? (
-            <div className="rounded-2xl border border-dashed border-border p-12 text-center space-y-4 bg-surface-1/50 my-10">
-              <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
-                <FileCode className="w-6 h-6" />
-              </div>
-              <div>
-                <h2 className="text-xl font-medium text-foreground">{activeDocId} Documentation</h2>
-                <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-                  Automatic generation for {activeDocId.toLowerCase()} documentation is currently in progress. AutoScribe is actively building models for this section.
-                </p>
-              </div>
-              <div className="pt-2 flex justify-center gap-3">
-                <button
-                  onClick={() => setActiveDocId("README")}
-                  className="inline-flex items-center gap-1.5 px-3.5 h-8 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 transition"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" /> Back to README
-                </button>
-              </div>
+          {isDocLoading ? (
+            <div className="py-20 text-center space-y-3">
+              <Sparkles className="w-8 h-8 mx-auto text-primary animate-pulse" />
+              <p className="text-sm text-muted-foreground">Loading document content...</p>
             </div>
           ) : mode === "source" ? (
             <pre className="text-[13px] font-mono leading-[1.7] text-foreground/85 bg-surface-1 border border-border rounded-md p-5 overflow-x-auto whitespace-pre-wrap">
-{`# ${readme.title}
-
-${readme.tagline}
-
-## Overview
-
-${readme.overview}
-
-## Features
-
-${readme.features.map((f:string) => `- ${f}`).join("\n")}
-
-## Quick Start
-
-\`\`\`bash
-${readme.quickStart}
-\`\`\`
-
-## Architecture
-
-${readme.architecture}
-`}
+              {docMarkdown || `# ${readme.title}\n\n${readme.overview}`}
             </pre>
-          ) : (
+          ) : currentDoc?.markdown ? (
+            <div className={`${proseSize} text-foreground/90 space-y-4 font-sans whitespace-pre-wrap`}>
+              <pre className="text-[14px] font-sans leading-[1.8] text-foreground/90 bg-transparent border-0 overflow-x-auto whitespace-pre-wrap">
+                {currentDoc.markdown}
+              </pre>
+            </div>
+          ) : activeSlug === "readme" ? (
             <div className={`${proseSize} text-foreground/90 space-y-6`}>
               <h1 className="font-display text-[34px] leading-tight font-medium tracking-tight text-foreground">
                 {readme.title}
@@ -414,13 +420,25 @@ ${readme.architecture}
                 <h2 className="text-xl font-medium text-foreground mt-8 mb-3">Architecture</h2>
                 <p>{readme.architecture}</p>
               </section>
-
-              <div className="mt-10 pt-6 border-t border-border flex items-center justify-between text-[13px]">
-                <button className="inline-flex items-center gap-2 px-3 h-9 rounded-md border border-border bg-surface-1 hover:bg-surface-2 text-muted-foreground hover:text-foreground transition">
-                  <ArrowLeft className="w-3.5 h-3.5" /> Getting Started
-                </button>
-                <button className="inline-flex items-center gap-2 px-3 h-9 rounded-md border border-border bg-surface-1 hover:bg-surface-2 text-muted-foreground hover:text-foreground transition">
-                  Environment Variables <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-border p-12 text-center space-y-4 bg-surface-1/50 my-10">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+                <FileCode className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-medium text-foreground">{activeDocId} Documentation</h2>
+                <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                  Click <strong>Regenerate</strong> above to build models and generate real documentation for {activeDocId}.
+                </p>
+              </div>
+              <div className="pt-2 flex justify-center gap-3">
+                <button
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating}
+                  className="inline-flex items-center gap-1.5 px-4 h-9 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 disabled:opacity-50 transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> {isRegenerating ? "Generating..." : "Generate Now"}
                 </button>
               </div>
             </div>
@@ -431,9 +449,9 @@ ${readme.architecture}
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 h-7 border-t border-border bg-surface-1 text-[11px] text-muted-foreground">
         <span className="inline-flex items-center gap-1.5 text-success">
-          <Check className="w-3 h-3" /> {readme.status} · {readme.updated}
+          <Check className="w-3 h-3" /> {currentDoc?.status || readme.status} · {currentDoc?.updated || readme.updated}
         </span>
-        <span className="hidden sm:inline">Markdown · UTF-8 · Template: README</span>
+        <span className="hidden sm:inline">Markdown · {currentDoc?.wordCount ?? 0} words · {activeDocId}</span>
       </div>
     </div>
   );

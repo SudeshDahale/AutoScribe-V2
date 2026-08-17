@@ -1,14 +1,24 @@
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.auth import get_current_user
 from app.core.config import settings
-from app.db.session import get_db
-from app.models import User, Repository, Document, DocumentVersion
+from app.db.session import get_db, SessionLocal
+from app.models import User, Repository, Document, DocumentVersion, Analysis, Module
+from app.services.docs import (
+    generate_readme,
+    generate_api_reference,
+    generate_architecture_doc,
+    generate_runbook,
+    readme_to_markdown,
+    api_reference_to_markdown,
+    architecture_to_markdown,
+    runbook_to_markdown,
+)
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
@@ -37,26 +47,31 @@ def _word_count(content: str) -> int:
     words in the actual text fields, not the JSON punctuation."""
     try:
         data = json.loads(content)
-        parts = [
-            data.get("tagline", ""),
-            data.get("overview", ""),
-            " ".join(data.get("features", [])),
-            data.get("quick_start", ""),
-            data.get("architecture", ""),
-        ]
-        return len(" ".join(parts).split())
+        if isinstance(data, dict):
+            text = json.dumps(data)
+            return len(text.split())
+        return len(str(data).split())
     except (json.JSONDecodeError, AttributeError):
         return len(content.split())
 
 
+def _render_doc_markdown(slug: str, data: dict) -> str:
+    if slug == "readme":
+        return readme_to_markdown(data)
+    elif slug == "api-reference":
+        return api_reference_to_markdown(data)
+    elif slug == "architecture-guide":
+        return architecture_to_markdown(data)
+    elif slug == "developer-runbook":
+        return runbook_to_markdown(data)
+    return json.dumps(data, indent=2)
+
+
 @router.get("/repos/{repo_id}/documents")
 def list_documents(repo_id: int, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
-    """Returns all documents for a repo with their latest version status.
-    Uses a single subquery (window function style via correlated subquery) to
-    avoid the previous N+1 pattern of one query per document."""
+    """Returns all documents for a repo with their latest version status."""
     repo = _owned_repo(repo_id, user, db)
 
-    # Subquery: for each document, find the id of its most recent version.
     latest_version_subq = (
         select(func.max(DocumentVersion.id))
         .where(DocumentVersion.document_id == Document.id)
@@ -97,14 +112,105 @@ def get_readme(repo_id: int, user: User = Depends(get_current_user), db: DBSessi
 
     data = json.loads(latest.content)
     return {
-        "title": data["title"],
-        "tagline": data["tagline"],
-        "overview": data["overview"],
-        "features": data["features"],
-        "quickStart": data["quick_start"],
-        "architecture": data["architecture"],
+        "title": data.get("title", repo.name),
+        "tagline": data.get("tagline", ""),
+        "overview": data.get("overview", ""),
+        "features": data.get("features", []),
+        "quickStart": data.get("quick_start", ""),
+        "architecture": data.get("architecture", ""),
         "status": latest.status,
         "updated": _humanize(latest.created_at),
+        "markdown": readme_to_markdown(data),
+    }
+
+
+@router.get("/repos/{repo_id}/documents/by-slug/{slug}")
+def get_document_by_slug(repo_id: int, slug: str, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+    repo = _owned_repo(repo_id, user, db)
+    doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()
+    latest = (
+        db.query(DocumentVersion).filter(DocumentVersion.document_id == doc.id).order_by(DocumentVersion.id.desc()).first()
+        if doc else None
+    )
+    if not doc or not latest:
+        raise HTTPException(status_code=404, detail=f"Document '{slug}' not generated yet")
+
+    try:
+        data = json.loads(latest.content)
+    except json.JSONDecodeError:
+        data = {"content": latest.content}
+
+    return {
+        "id": doc.id,
+        "slug": doc.slug,
+        "title": doc.title,
+        "section": doc.section,
+        "status": latest.status,
+        "updated": _humanize(latest.created_at),
+        "content": data,
+        "markdown": _render_doc_markdown(slug, data),
+        "wordCount": _word_count(latest.content),
+    }
+
+
+@router.post("/repos/{repo_id}/documents/{slug}/regenerate")
+def regenerate_document(
+    repo_id: int,
+    slug: str,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    repo = _owned_repo(repo_id, user, db)
+    analysis = (
+        db.query(Analysis)
+        .filter(Analysis.repository_id == repo.id)
+        .order_by(Analysis.id.desc())
+        .first()
+    )
+    modules_rows = db.query(Module).filter(Module.repository_id == repo.id).all()
+    modules = [{"name": m.name, "description": m.description} for m in modules_rows]
+    sample_files = analysis.sample_files if analysis and analysis.sample_files else []
+    tech_stack = analysis.tech_stack if analysis and analysis.tech_stack else []
+    arch_style = analysis.architecture_style if analysis and analysis.architecture_style else []
+
+    gen_map = {
+        "readme": ("README", "Getting Started", generate_readme),
+        "api-reference": ("API Reference", "API & Interfaces", generate_api_reference),
+        "architecture-guide": ("Architecture Guide", "Architecture", generate_architecture_doc),
+        "developer-runbook": ("Developer Runbook", "Operations", generate_runbook),
+    }
+
+    if slug not in gen_map:
+        raise HTTPException(status_code=400, detail=f"Unsupported document slug: {slug}")
+
+    title, section, gen_fn = gen_map[slug]
+    doc_data = gen_fn(
+        repo_name=f"{repo.org}/{repo.name}",
+        tech_stack=tech_stack,
+        architecture_style=arch_style,
+        modules=modules,
+        sample_files=sample_files,
+    )
+
+    doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()
+    if not doc:
+        doc = Document(repository_id=repo.id, title=title, section=section, slug=slug)
+        db.add(doc)
+        db.flush()
+
+    new_version = DocumentVersion(
+        document_id=doc.id,
+        content=json.dumps(doc_data),
+        status="Synced with code",
+    )
+    db.add(new_version)
+    db.commit()
+
+    return {
+        "status": "regenerated",
+        "slug": slug,
+        "updated": _humanize(datetime.now(timezone.utc)),
+        "markdown": _render_doc_markdown(slug, doc_data),
     }
 
 

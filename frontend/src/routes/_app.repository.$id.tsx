@@ -1,9 +1,9 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { activeRepo, aiActivity, modules } from "@/lib/mock-data";
 import { useRepos, type UpdateTarget } from "@/lib/repo-store";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LiveDiagram, DiagramLegend } from "@/components/architecture/live-diagram";
-import { getRepoDiagrams } from "@/lib/architecture-graph";
+import { buildDiagramFromApi, type ApiArchitectureResponse } from "@/lib/architecture-graph";
 import {
   ArrowUpRight,
   GitCommit,
@@ -26,6 +26,7 @@ import {
   AlertTriangle,
   Zap,
   History,
+  Loader2,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/repository/$id")({
@@ -53,26 +54,122 @@ const modIcons: Record<string, React.ComponentType<{ className?: string }>> = {
 
 const tabs = ["Overview", "Architecture", "Modules", "Activity", "Settings"] as const;
 
+// ---------------------------------------------------------------------------
+// Activity row type for dashboard data
+// ---------------------------------------------------------------------------
+type ActivityRow = {
+  id: number;
+  repoId: string | null;
+  repo: string;
+  text: string;
+  type: string;
+  time: string;
+};
 
 function RepositoryPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const { repos, disconnect, getSettings, updateSettings, docHistoryFor } = useRepos();
-  const repo = repos.find((r) => r.id === id);
+  const queryClient = useQueryClient();
+  const { repos, getSettings, updateSettings, docHistoryFor } = useRepos();
+  const repo = repos.find((r) => String(r.id) === String(id) || r.githubRepoId === id);
   const [tab, setTab] = useState<(typeof tabs)[number]>("Overview");
   const [confirm, setConfirm] = useState(false);
-  const diagrams = useMemo(() => getRepoDiagrams(id), [id]);
-  const [archViewId, setArchViewId] = useState<string>(diagrams[0].id);
-  const archView = diagrams.find((d) => d.id === archViewId) ?? diagrams[0];
+  const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const history = docHistoryFor(id);
   const settings = getSettings(id);
+
+  // ------------------------------------------------------------------
+  // Fetch real architecture + analysis data
+  // ------------------------------------------------------------------
+  const { data: archData, isLoading: archLoading } = useQuery<ApiArchitectureResponse | null>({
+    queryKey: ["architecture", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/repos/${id}/architecture`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!id,
+  });
+
+  const { data: analysisData } = useQuery({
+    queryKey: ["analysis", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/repos/${id}/analysis`);
+      if (!res.ok) return null;
+      return res.json() as Promise<{ filesAnalyzed: number; modulesDetected: number; techStack: string[] }>;
+    },
+    enabled: !!id,
+  });
+
+  // ------------------------------------------------------------------
+  // Fetch real activity for this repo from the dashboard endpoint
+  // ------------------------------------------------------------------
+  const { data: dashData } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard");
+      if (!res.ok) return null;
+      return res.json() as Promise<{ activity: ActivityRow[] }>;
+    },
+  });
+  const repoActivity = (dashData?.activity ?? []).filter(
+    (a) => String(a.repoId) === String(id),
+  );
+
+  // ------------------------------------------------------------------
+  // Re-analyze mutation
+  // ------------------------------------------------------------------
+  const reanalyzeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/repos/${id}/analyze`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to start analysis");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["analysis", id] });
+      queryClient.invalidateQueries({ queryKey: ["architecture", id] });
+    },
+  });
+
+  // ------------------------------------------------------------------
+  // Disconnect mutation
+  // ------------------------------------------------------------------
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/repos/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? "Failed to disconnect repository");
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      navigate({ to: "/repositories", search: { add: undefined } });
+    },
+    onError: (err: Error) => {
+      setDisconnectError(err.message);
+    },
+  });
+
+  // ------------------------------------------------------------------
+  // Architecture diagram nodes/edges
+  // ------------------------------------------------------------------
+  const diagram = useMemo(() => {
+    if (!archData?.nodes?.length) return null;
+    const views = buildDiagramFromApi(archData);
+    return views[0] ?? null;
+  }, [archData]);
+
+  const diagramNodes = diagram?.nodes;
+  const diagramEdges = diagram?.edges;
 
   if (!repo) {
     return (
       <div className="rounded-xl border border-border bg-surface-1 p-10 text-center">
-        <div className="text-[15px] font-medium">This repository isn’t connected</div>
+        <div className="text-[15px] font-medium">This repository isn't connected</div>
         <p className="mt-1 text-[13px] text-muted-foreground">
-          It may have been disconnected. Reconnect it to resume documentation.
+          It may have been disconnected or is currently loading.
         </p>
         <Link
           to="/repositories"
@@ -86,6 +183,11 @@ function RepositoryPage() {
   }
 
   const attention = repo.status !== "synced";
+  const techStack = archData?.techStack ?? [];
+  const architectureStyle = archData?.architectureStyle ?? [];
+  const modules = archData?.modules ?? [];
+  const filesAnalyzed = analysisData?.filesAnalyzed ?? repo.docsCount ?? 0;
+  const modulesDetected = analysisData?.modulesDetected ?? modules.length;
 
   return (
     <div className="space-y-5">
@@ -148,13 +250,15 @@ function RepositoryPage() {
               <Sparkles className="w-3.5 h-3.5" /> Ask AI
             </Link>
             <button
-              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-surface-2 text-[13px] text-muted-foreground hover:text-foreground hover:bg-surface-3"
+              onClick={() => reanalyzeMutation.mutate()}
+              disabled={reanalyzeMutation.isPending || repo.status === "analyzing"}
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-surface-2 text-[13px] text-muted-foreground hover:text-foreground hover:bg-surface-3 disabled:opacity-50"
               title="Re-analyze repository"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className={`w-3.5 h-3.5 ${reanalyzeMutation.isPending ? "animate-spin" : ""}`} />
             </button>
             <button
-              onClick={() => setConfirm(true)}
+              onClick={() => { setDisconnectError(null); setConfirm(true); }}
               className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-surface-2 text-[13px] text-muted-foreground hover:text-destructive hover:border-destructive/40"
               title="Disconnect repository"
             >
@@ -173,8 +277,8 @@ function RepositoryPage() {
             value={repo.openPRs}
             tone={repo.openPRs > 0 ? "warning" : undefined}
           />
-          <Cell icon={Boxes} label="Modules" value={activeRepo.modulesDetected} />
-          <Cell icon={Activity} label="Files analyzed" value={activeRepo.filesAnalyzed} />
+          <Cell icon={Boxes} label="Modules" value={modulesDetected} />
+          <Cell icon={Activity} label="Files analyzed" value={filesAnalyzed} />
         </div>
       </header>
 
@@ -184,15 +288,22 @@ function RepositoryPage() {
           <AlertTriangle className="w-4 h-4 text-warning shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium">
-              {activeRepo.lastCommit.message} — documentation update required
+              Documentation may be out of sync
             </div>
             <div className="text-[12px] text-muted-foreground mt-0.5">
-              {activeRepo.lastCommit.files} files changed · commit {activeRepo.lastCommit.sha} ·{" "}
-              {activeRepo.lastCommit.time}
+              {repo.lastActivity}
             </div>
           </div>
-          <button className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-primary text-primary-foreground text-[12.5px] font-medium hover:brightness-95">
-            <Sparkles className="w-3.5 h-3.5" /> Generate update
+          <button
+            onClick={() => reanalyzeMutation.mutate()}
+            disabled={reanalyzeMutation.isPending || repo.status === "analyzing"}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-primary text-primary-foreground text-[12.5px] font-medium hover:brightness-95 disabled:opacity-50"
+          >
+            {reanalyzeMutation.isPending ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Analyzing…</>
+            ) : (
+              <><Sparkles className="w-3.5 h-3.5" /> Generate update</>
+            )}
           </button>
         </section>
       )}
@@ -216,36 +327,64 @@ function RepositoryPage() {
 
       {tab === "Overview" && (
         <div className="grid grid-cols-12 gap-4">
-          <ArchitectureCard
-            onExpand={() => setTab("Architecture")}
-            className="col-span-12 xl:col-span-8"
-            view={archView}
-          />
+          <div className="col-span-12 xl:col-span-8 rounded-xl border border-border bg-surface-1 overflow-hidden">
+            <div className="flex items-center justify-between px-4 h-11 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-success" />
+                <span className="text-[13px] font-medium">Architecture overview</span>
+                <span className="text-[11.5px] text-muted-foreground hidden sm:inline">· live traffic</span>
+              </div>
+              <button
+                onClick={() => setTab("Architecture")}
+                className="text-[11.5px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+              >
+                Expand <ArrowUpRight className="w-3 h-3" />
+              </button>
+            </div>
+            {archLoading ? (
+              <div className="flex items-center justify-center h-48 text-muted-foreground text-[13px] gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading architecture…
+              </div>
+            ) : (
+              <LiveDiagram compact nodes={diagramNodes} edges={diagramEdges} />
+            )}
+            <div className="px-4 py-3 border-t border-border">
+              <DiagramLegend />
+            </div>
+          </div>
           <div className="col-span-12 xl:col-span-4 space-y-4">
             <Panel title="Tech stack">
-              <div className="flex flex-wrap gap-1.5">
-                {activeRepo.techStack.map((t) => (
-                  <span
-                    key={t}
-                    className="text-[12px] px-2 h-6 inline-flex items-center rounded-md bg-surface-2 border border-border"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
-              <div className="mt-3 text-[10px] uppercase tracking-wider text-muted-foreground">
-                Architecture style
-              </div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {activeRepo.architectureStyle.map((t) => (
-                  <span
-                    key={t}
-                    className="text-[12px] px-2 h-6 inline-flex items-center rounded-md bg-surface-2 border border-border text-muted-foreground"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
+              {techStack.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {techStack.map((t) => (
+                    <span
+                      key={t}
+                      className="text-[12px] px-2 h-6 inline-flex items-center rounded-md bg-surface-2 border border-border"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[12px] text-muted-foreground">Not yet analyzed</div>
+              )}
+              {architectureStyle.length > 0 && (
+                <>
+                  <div className="mt-3 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    Architecture style
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {architectureStyle.map((t) => (
+                      <span
+                        key={t}
+                        className="text-[12px] px-2 h-6 inline-flex items-center rounded-md bg-surface-2 border border-border text-muted-foreground"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
             </Panel>
 
             <Panel
@@ -259,25 +398,31 @@ function RepositoryPage() {
                 </button>
               }
             >
-              <div className="space-y-1">
-                {modules.slice(0, 4).map((m) => {
-                  const Icon = modIcons[m.icon] ?? Package;
-                  return (
-                    <div
-                      key={m.name}
-                      className="flex items-start gap-2.5 p-2 rounded-md hover:bg-surface-2 transition cursor-pointer"
-                    >
-                      <div className="w-7 h-7 rounded-md bg-surface-2 border border-border flex items-center justify-center shrink-0">
-                        <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+              {modules.length === 0 ? (
+                <div className="text-[12.5px] text-muted-foreground">
+                  {archLoading ? "Loading…" : "No modules detected yet"}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {modules.slice(0, 4).map((m) => {
+                    const Icon = modIcons[m.icon] ?? Package;
+                    return (
+                      <div
+                        key={m.name}
+                        className="flex items-start gap-2.5 p-2 rounded-md hover:bg-surface-2 transition cursor-pointer"
+                      >
+                        <div className="w-7 h-7 rounded-md bg-surface-2 border border-border flex items-center justify-center shrink-0">
+                          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[13px]">{m.name}</div>
+                          <div className="text-[11.5px] text-muted-foreground truncate">{m.description}</div>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-[13px]">{m.name}</div>
-                        <div className="text-[11.5px] text-muted-foreground truncate">{m.desc}</div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </Panel>
           </div>
         </div>
@@ -285,93 +430,108 @@ function RepositoryPage() {
 
       {tab === "Architecture" && (
         <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-surface-1 p-1.5">
-            <div className="flex items-center gap-1 overflow-x-auto">
-              {diagrams.map((d) => {
-                const active = d.id === archView.id;
-                return (
-                  <button
-                    key={d.id}
-                    onClick={() => setArchViewId(d.id)}
-                    className={`px-3 h-8 text-[12.5px] rounded-md whitespace-nowrap transition ${
-                      active
-                        ? "bg-surface-3 text-foreground"
-                        : "text-muted-foreground hover:text-foreground hover:bg-surface-2"
-                    }`}
-                  >
-                    {d.name}
-                  </button>
-                );
-              })}
+          <div className="rounded-xl border border-border bg-surface-1 overflow-hidden">
+            <div className="flex items-center justify-between px-4 h-11 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Activity className="w-3.5 h-3.5 text-success" />
+                <span className="text-[13px] font-medium">Full architecture</span>
+              </div>
+              <Link
+                to="/architecture"
+                className="text-[11.5px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+              >
+                Full view <ArrowUpRight className="w-3 h-3" />
+              </Link>
             </div>
-            <div className="px-2 pt-1.5 pb-0.5 text-[11.5px] text-muted-foreground">
-              {archView.description}
+            {archLoading ? (
+              <div className="flex items-center justify-center h-64 text-muted-foreground text-[13px] gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading architecture…
+              </div>
+            ) : (
+              <LiveDiagram nodes={diagramNodes} edges={diagramEdges} />
+            )}
+            <div className="px-4 py-3 border-t border-border">
+              <DiagramLegend />
             </div>
           </div>
-          <ArchitectureCard full view={archView} />
         </div>
+      )}
+
+      {tab === "Modules" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {modules.length === 0 ? (
+            <div className="col-span-full text-center text-[13px] text-muted-foreground py-12 rounded-xl border border-dashed border-border">
+              {archLoading ? "Loading modules…" : "No modules detected. Run an analysis first."}
+            </div>
+          ) : (
+            modules.map((m) => {
+              const Icon = modIcons[m.icon] ?? Package;
+              return (
+                <div
+                  key={m.name}
+                  className="rounded-xl border border-border bg-surface-1 p-4 hover:border-foreground/20 transition"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-md bg-surface-2 border border-border flex items-center justify-center">
+                      <Icon className="w-4 h-4 text-muted-foreground" />
+                    </div>
+                    <div className="text-[13.5px] font-medium">{m.name}</div>
+                  </div>
+                  <p className="mt-2.5 text-[12.5px] text-muted-foreground leading-relaxed">
+                    {m.description}
+                  </p>
+                  <Link
+                    to="/documentation"
+                    className="mt-3 inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+                  >
+                    Open docs <ArrowUpRight className="w-3 h-3" />
+                  </Link>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {tab === "Activity" && (
+        <Panel title="Recent intelligence">
+          {repoActivity.length === 0 ? (
+            <div className="text-[12.5px] text-muted-foreground">
+              No recent activity for this repository.
+            </div>
+          ) : (
+            <ol className="relative border-l border-border ml-2 space-y-4">
+              {repoActivity.map((a) => (
+                <li key={a.id} className="pl-5 relative">
+                  <span className="absolute -left-[9px] top-0.5 w-4 h-4 rounded-full bg-surface-2 border border-border flex items-center justify-center">
+                    <Check className="w-2.5 h-2.5 text-success" />
+                  </span>
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <div className="text-[13px]">{a.text}</div>
+                    <div className="text-[11.5px] text-muted-foreground shrink-0 inline-flex items-center gap-1.5">
+                      <GitCommit className="w-3 h-3" /> {a.time}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Panel>
       )}
 
       {tab === "Settings" && (
         <SettingsPanel
+          repoId={id}
           settings={settings}
           onChange={(patch) => updateSettings(id, patch)}
           history={history}
         />
       )}
 
-
-      {tab === "Modules" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-          {modules.map((m) => {
-            const Icon = modIcons[m.icon] ?? Package;
-            return (
-              <div
-                key={m.name}
-                className="rounded-xl border border-border bg-surface-1 p-4 hover:border-foreground/20 transition"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-md bg-surface-2 border border-border flex items-center justify-center">
-                    <Icon className="w-4 h-4 text-muted-foreground" />
-                  </div>
-                  <div className="text-[13.5px] font-medium">{m.name}</div>
-                </div>
-                <p className="mt-2.5 text-[12.5px] text-muted-foreground leading-relaxed">
-                  {m.desc}
-                </p>
-                <button className="mt-3 inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground">
-                  Open docs <ArrowUpRight className="w-3 h-3" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {tab === "Activity" && (
-        <Panel title="Recent intelligence">
-          <ol className="relative border-l border-border ml-2 space-y-4">
-            {aiActivity.map((a, i) => (
-              <li key={i} className="pl-5 relative">
-                <span className="absolute -left-[9px] top-0.5 w-4 h-4 rounded-full bg-surface-2 border border-border flex items-center justify-center">
-                  <Check className="w-2.5 h-2.5 text-success" />
-                </span>
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <div className="text-[13px]">{a.text}</div>
-                  <div className="text-[11.5px] text-muted-foreground shrink-0 inline-flex items-center gap-1.5">
-                    <GitCommit className="w-3 h-3" /> {a.commit} · {a.time}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </Panel>
-      )}
-
       {confirm && (
         <div
           className="fixed inset-0 z-50 bg-background/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
-          onClick={() => setConfirm(false)}
+          onClick={() => { if (!disconnectMutation.isPending) setConfirm(false); }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -381,21 +541,30 @@ function RepositoryPage() {
             <p className="mt-1.5 text-[13px] text-muted-foreground">
               AutoScribe stops analysing this repository. You can reconnect it any time.
             </p>
+            {disconnectError && (
+              <div className="mt-3 flex items-start gap-2 text-[12px] text-destructive bg-destructive/10 border border-destructive/25 rounded-lg p-3">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{disconnectError}</span>
+              </div>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setConfirm(false)}
-                className="h-9 px-3.5 rounded-md border border-border bg-surface-2 text-[13px] hover:bg-surface-3"
+                disabled={disconnectMutation.isPending}
+                className="h-9 px-3.5 rounded-md border border-border bg-surface-2 text-[13px] hover:bg-surface-3 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  disconnect(repo.id);
-                  navigate({ to: "/repositories", search: { add: undefined } });
-                }}
-                className="h-9 px-3.5 rounded-md bg-destructive text-destructive-foreground text-[13px] font-medium hover:brightness-95"
+                onClick={() => disconnectMutation.mutate()}
+                disabled={disconnectMutation.isPending}
+                className="h-9 px-3.5 rounded-md bg-destructive text-destructive-foreground text-[13px] font-medium hover:brightness-95 disabled:opacity-50 inline-flex items-center gap-1.5"
               >
-                Disconnect
+                {disconnectMutation.isPending ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Disconnecting…</>
+                ) : (
+                  "Disconnect"
+                )}
               </button>
             </div>
           </div>
@@ -405,58 +574,13 @@ function RepositoryPage() {
   );
 }
 
-function ArchitectureCard({
-  className = "",
-  full = false,
-  onExpand,
-  view,
-}: {
-  className?: string;
-  full?: boolean;
-  onExpand?: () => void;
-  view?: ReturnType<typeof getRepoDiagrams>[number];
-}) {
-  return (
-    <div className={`rounded-xl border border-border bg-surface-1 overflow-hidden ${className}`}>
-      <div className="flex items-center justify-between px-4 h-11 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Activity className="w-3.5 h-3.5 text-success" />
-          <span className="text-[13px] font-medium">
-            {view ? view.name : "Architecture overview"}
-          </span>
-          <span className="text-[11.5px] text-muted-foreground hidden sm:inline">
-            · live traffic
-          </span>
-        </div>
-        {full ? (
-          <Link
-            to="/architecture"
-            className="text-[11.5px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-          >
-            Full architecture <ArrowUpRight className="w-3 h-3" />
-          </Link>
-        ) : (
-          <button
-            onClick={onExpand}
-            className="text-[11.5px] text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
-          >
-            Expand <ArrowUpRight className="w-3 h-3" />
-          </button>
-        )}
-      </div>
-      <LiveDiagram compact={!full} nodes={view?.nodes} edges={view?.edges} />
-      <div className="px-4 py-3 border-t border-border">
-        <DiagramLegend />
-      </div>
-    </div>
-  );
-}
-
 function SettingsPanel({
+  repoId,
   settings,
   onChange,
   history,
 }: {
+  repoId: string;
   settings: import("@/lib/repo-store").RepoSettings;
   onChange: (patch: Partial<import("@/lib/repo-store").RepoSettings>) => void;
   history: import("@/lib/repo-store").DocHistoryEntry[];
@@ -622,9 +746,10 @@ function Cell({
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  value: number | string;
+  value?: number | string | null;
   tone?: "warning";
 }) {
+  const display = value === null || value === undefined ? "0" : typeof value === "number" ? value.toLocaleString() : value;
   return (
     <div className="rounded-lg border border-border bg-surface-2 px-3 py-2.5">
       <div className="flex items-center gap-1.5 text-[10.5px] uppercase tracking-wider text-muted-foreground">
@@ -633,22 +758,23 @@ function Cell({
       <div
         className={`mt-1 text-[18px] font-medium tabular-nums ${tone === "warning" ? "text-warning" : ""}`}
       >
-        {typeof value === "number" ? value.toLocaleString() : value}
+        {display}
       </div>
     </div>
   );
 }
 
-function ScoreCell({ score }: { score: number }) {
+function ScoreCell({ score }: { score?: number | null }) {
+  const safeScore = typeof score === "number" && !isNaN(score) ? score : 0;
   return (
     <div className="rounded-lg border border-border bg-surface-2 px-3 py-2.5">
       <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
         Understanding
       </div>
       <div className="mt-1 flex items-center gap-2">
-        <span className="text-[18px] font-medium tabular-nums">{score}%</span>
+        <span className="text-[18px] font-medium tabular-nums">{safeScore}%</span>
         <div className="flex-1 h-1 rounded-full bg-surface-3 overflow-hidden">
-          <div className="h-full bg-success" style={{ width: `${score}%` }} />
+          <div className="h-full bg-success" style={{ width: `${Math.min(100, Math.max(0, safeScore))}%` }} />
         </div>
       </div>
     </div>

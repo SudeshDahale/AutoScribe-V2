@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { OAuthButton } from "@/components/OAuthButton";
 import {
   Github,
   ArrowRight,
@@ -155,68 +156,45 @@ const go = (kind: "github" | "email") => {
               : "Takes about ten seconds. No credit card."}
           </p>
 
-          <button
+          <OAuthButton
+            provider="github"
             onClick={() => go("github")}
             disabled={pending !== null}
-            className="mt-7 w-full inline-flex items-center justify-center gap-2 h-11 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-95 transition disabled:opacity-70"
-          >
-            {pending === "github" ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" /> Redirecting to GitHub…
-              </>
-            ) : (
-              <>
-                <Github className="w-4 h-4" />
-                {mode === "signin" ? "Continue with GitHub" : "Sign up with GitHub"}
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
+            loading={pending === "github"}
+          />
+
           <p className="mt-2.5 text-[11.5px] text-muted-foreground inline-flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5" /> Signs you in and connects GitHub in one step.
           </p>
 
           <div className="my-6 flex items-center gap-3 text-[11px] text-muted-foreground">
             <span className="h-px flex-1 bg-border" />
-            or use email
+            <span>or use email <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 border border-border text-muted-foreground ml-1">Coming soon</span></span>
             <span className="h-px flex-1 bg-border" />
           </div>
 
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              go("email");
-            }}
-            className="space-y-2.5"
-          >
+          <div className="space-y-2.5 opacity-60">
             <label className="block">
               <span className="sr-only">Work email</span>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
                 <input
                   type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
-                  className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-1 border border-border text-[13px] placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                  disabled
+                  value=""
+                  placeholder="name@company.com (GitHub login required)"
+                  className="w-full h-10 pl-9 pr-3 rounded-lg bg-surface-1/50 border border-border text-[13px] placeholder:text-muted-foreground/50 cursor-not-allowed"
                 />
               </div>
             </label>
             <button
-              type="submit"
-              disabled={pending !== null}
-              className="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg border border-border bg-surface-2 text-[13px] hover:bg-surface-3 transition disabled:opacity-70"
+              type="button"
+              disabled
+              className="w-full inline-flex items-center justify-center gap-2 h-10 rounded-lg border border-border bg-surface-2/40 text-[13px] text-muted-foreground cursor-not-allowed"
             >
-              {pending === "email" ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Sending magic link…
-                </>
-              ) : (
-                <>Email me a sign-in link</>
-              )}
+              Email Sign-in (Use GitHub Above)
             </button>
-          </form>
+          </div>
 
           <ul className="mt-7 space-y-1.5 text-[12px] text-muted-foreground">
             {["No password to remember", "Read-only repository access", "Free while you evaluate"].map(

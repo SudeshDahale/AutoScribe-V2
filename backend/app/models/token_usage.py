@@ -11,7 +11,7 @@ class TokenUsage(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    repository_id: Mapped[int | None] = mapped_column(ForeignKey("repositories.id"), nullable=True)
+    repository_id: Mapped[int | None] = mapped_column(ForeignKey("repositories.id", ondelete="SET NULL"), nullable=True)
     tokens: Mapped[int] = mapped_column(Integer)
     kind: Mapped[str] = mapped_column(String)  # analysis | chat
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

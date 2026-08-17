@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Server } from "lucide-react";
 import {
   graphEdges as defaultEdges,
   graphLayers,
@@ -185,7 +186,7 @@ export function LiveDiagram({
 
         {/* Nodes */}
         {nodes.map((n: GraphNode) => {
-          const Icon = n.icon;
+          const Icon = n.icon || Server;
           const active = selectedId === n.id;
           const dim = connected ? !connected.has(n.id) : false;
           const accent = typeAccent[n.type];

@@ -333,7 +333,27 @@ function Documentation() {
       {/* Document body */}
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-[800px] px-6 py-8">
-          {mode === "source" ? (
+          {activeDocId !== "README" ? (
+            <div className="rounded-2xl border border-dashed border-border p-12 text-center space-y-4 bg-surface-1/50 my-10">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto text-primary">
+                <FileCode className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl font-medium text-foreground">{activeDocId} Documentation</h2>
+                <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                  Automatic generation for {activeDocId.toLowerCase()} documentation is currently in progress. AutoScribe is actively building models for this section.
+                </p>
+              </div>
+              <div className="pt-2 flex justify-center gap-3">
+                <button
+                  onClick={() => setActiveDocId("README")}
+                  className="inline-flex items-center gap-1.5 px-3.5 h-8 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 transition"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" /> Back to README
+                </button>
+              </div>
+            </div>
+          ) : mode === "source" ? (
             <pre className="text-[13px] font-mono leading-[1.7] text-foreground/85 bg-surface-1 border border-border rounded-md p-5 overflow-x-auto whitespace-pre-wrap">
 {`# ${readme.title}
 

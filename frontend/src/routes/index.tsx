@@ -19,12 +19,6 @@ export const Route = createFileRoute("/")({
 function Landing() {
   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage.getItem("autoscribe.hasConnected") === "1") {
-      navigate({ to: "/dashboard", replace: true });
-    }
-  }, [navigate]);
-
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <header className="h-14 px-6 flex items-center border-b border-border">

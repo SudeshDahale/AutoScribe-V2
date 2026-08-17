@@ -71,12 +71,15 @@ const RepoContext = createContext<RepoStore | null>(null);
 export function RepoProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [connecting, setConnecting] = useState<string | null>(null);
-  const [settingsById, setSettingsById] = useState<Record<string, RepoSettings>>({});
   const [docHistory] = useState<DocHistoryEntry[]>(seedHistory);
+
+  // Optimistic local settings cache — pre-populated from server via useQuery
+  const [settingsOverride, setSettingsOverride] = useState<Record<string, Partial<RepoSettings>>>({});
 
   const meQuery = useQuery({
     queryKey: ["auth-me"],
     enabled: typeof window !== "undefined",
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const res = await fetch("/api/auth/me");
       if (!res.ok) return null;
@@ -87,6 +90,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   const reposQuery = useQuery({
     queryKey: ["repos"],
     enabled: typeof window !== "undefined",
+    staleTime: 60 * 1000,
     queryFn: async () => {
       const res = await fetch("/api/repos");
       if (!res.ok) return [];
@@ -97,6 +101,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   const availableQuery = useQuery({
     queryKey: ["github-repos"],
     enabled: typeof window !== "undefined",
+    staleTime: 5 * 60 * 1000,
     queryFn: async () => {
       const res = await fetch("/api/github/repos");
       if (!res.ok) return [];
@@ -129,9 +134,45 @@ export function RepoProvider({ children }: { children: ReactNode }) {
   const disconnectMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/repos/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed to disconnect repository");
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.detail ?? "Failed to disconnect repository");
+      }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
+    // Error is surfaced by the caller (repository detail page) so we don't
+    // show a duplicate notification here — just invalidate so the list stays fresh.
+    onError: () => queryClient.invalidateQueries({ queryKey: ["repos"] }),
+  });
+
+  // Settings persistence — PATCH to the API, with optimistic local override
+  const settingsMutation = useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: Partial<RepoSettings> }) => {
+      const body: Record<string, unknown> = {};
+      if (patch.autoUpdate !== undefined) body.auto_update = patch.autoUpdate;
+      if (patch.updateTarget !== undefined) body.update_target = patch.updateTarget;
+      if (patch.branchName !== undefined) body.branch_name = patch.branchName;
+      const res = await fetch(`/api/repos/${id}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to save settings");
+      return res.json() as Promise<{ autoUpdate: boolean; updateTarget: UpdateTarget; branchName?: string }>;
+    },
+    onSuccess: (data, { id }) => {
+      // Reflect the server's canonical values back into the override map
+      setSettingsOverride((prev) => ({
+        ...prev,
+        [id]: {
+          autoUpdate: data.autoUpdate,
+          updateTarget: data.updateTarget as UpdateTarget,
+          branchName: data.branchName,
+        },
+      }));
+      // Invalidate the dedicated settings query if one exists
+      queryClient.invalidateQueries({ queryKey: ["repo-settings", id] });
+    },
   });
 
   const repos = reposQuery.data ?? [];
@@ -156,11 +197,26 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     [repos],
   );
 
-  const getSettings = useCallback((id: string) => settingsById[id] ?? defaultSettings, [settingsById]);
+  const getSettings = useCallback(
+    (id: string): RepoSettings => ({
+      ...defaultSettings,
+      ...settingsOverride[id],
+    }),
+    [settingsOverride],
+  );
 
-  const updateSettings = useCallback((id: string, patch: Partial<RepoSettings>) => {
-    setSettingsById((prev) => ({ ...prev, [id]: { ...(prev[id] ?? defaultSettings), ...patch } }));
-  }, []);
+  const updateSettings = useCallback(
+    (id: string, patch: Partial<RepoSettings>) => {
+      // Optimistic update: apply immediately so the UI responds instantly
+      setSettingsOverride((prev) => ({
+        ...prev,
+        [id]: { ...(prev[id] ?? defaultSettings), ...patch },
+      }));
+      // Persist to server (errors are silent — the optimistic state stays)
+      settingsMutation.mutate({ id, patch });
+    },
+    [settingsMutation],
+  );
 
   const docHistoryFor = useCallback(
     (repoId: string) => docHistory.filter((h) => h.repoId === repoId),

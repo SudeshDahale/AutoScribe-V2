@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session as DBSession
@@ -118,42 +119,52 @@ async def activity_stream(user: User = Depends(get_current_user)):
     as they're written, so the dashboard updates without a manual refresh.
     Polls the DB every 2s rather than LISTEN/NOTIFY -- simpler, and fast
     enough that a real analysis run (which takes several seconds of LLM
-    calls anyway) never feels delayed by the poll interval."""
+    calls anyway) never feels delayed by the poll interval.
+    All DB calls are executed via run_in_threadpool so the async generator
+    never blocks the event loop."""
     user_id = user.id
 
     async def event_generator():
         db = SessionLocal()
         try:
-            repo_ids = [r.id for r in db.query(Repository.id).filter(Repository.user_id == user_id).all()]
-            last_id = 0
-            if repo_ids:
-                latest = (
-                    db.query(ActivityLog.id)
-                    .filter(ActivityLog.repository_id.in_(repo_ids))
-                    .order_by(ActivityLog.id.desc())
-                    .first()
-                )
-                last_id = latest[0] if latest else 0
+            def _init():
+                repo_ids = [r.id for r in db.query(Repository.id).filter(Repository.user_id == user_id).all()]
+                last_id = 0
+                if repo_ids:
+                    latest = (
+                        db.query(ActivityLog.id)
+                        .filter(ActivityLog.repository_id.in_(repo_ids))
+                        .order_by(ActivityLog.id.desc())
+                        .first()
+                    )
+                    last_id = latest[0] if latest else 0
+                return repo_ids, last_id
+
+            repo_ids, last_id = await run_in_threadpool(_init)
 
             yield ": connected\n\n"  # comment line -- just opens the stream so the browser fires onopen
 
             while True:
                 await asyncio.sleep(2)
-                db.expire_all()  # otherwise SQLAlchemy's session cache would keep returning stale rows
 
-                repo_ids = [r.id for r in db.query(Repository.id).filter(Repository.user_id == user_id).all()]
-                if not repo_ids:
-                    continue
-                repos_by_id = {r.id: r.name for r in db.query(Repository).filter(Repository.id.in_(repo_ids)).all()}
+                def _poll(last_id=last_id):
+                    db.expire_all()  # otherwise SQLAlchemy's session cache would keep returning stale rows
+                    r_ids = [r.id for r in db.query(Repository.id).filter(Repository.user_id == user_id).all()]
+                    if not r_ids:
+                        return r_ids, {}, [], last_id
+                    repos_by_id = {r.id: r.name for r in db.query(Repository).filter(Repository.id.in_(r_ids)).all()}
+                    new_rows = (
+                        db.query(ActivityLog)
+                        .filter(ActivityLog.repository_id.in_(r_ids), ActivityLog.id > last_id)
+                        .order_by(ActivityLog.id.asc())
+                        .all()
+                    )
+                    new_last_id = new_rows[-1].id if new_rows else last_id
+                    return r_ids, repos_by_id, new_rows, new_last_id
 
-                new_rows = (
-                    db.query(ActivityLog)
-                    .filter(ActivityLog.repository_id.in_(repo_ids), ActivityLog.id > last_id)
-                    .order_by(ActivityLog.id.asc())
-                    .all()
-                )
+                repo_ids, repos_by_id, new_rows, last_id = await run_in_threadpool(_poll)
+
                 for row in new_rows:
-                    last_id = row.id
                     payload = {
                         "id": row.id,
                         "repoId": str(row.repository_id) if row.repository_id else None,
@@ -170,4 +181,4 @@ async def activity_stream(user: User = Depends(get_current_user)):
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    )

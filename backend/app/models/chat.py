@@ -10,7 +10,7 @@ class ChatConversation(Base):
     __tablename__ = "chat_conversations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -18,7 +18,7 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id"))
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String)  # user | assistant
     text: Mapped[str] = mapped_column(Text)
     flow: Mapped[list | None] = mapped_column(JSON, nullable=True)

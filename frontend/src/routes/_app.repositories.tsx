@@ -44,7 +44,10 @@ const statusMeta: Record<string, { dot: string; label: string; text: string }> =
   synced: { dot: "bg-success", label: "Synced", text: "text-success" },
   pending: { dot: "bg-warning", label: "Needs review", text: "text-warning" },
   analyzing: { dot: "bg-chart-5 pulse-dot", label: "Analyzing", text: "text-chart-5" },
+  failed: { dot: "bg-destructive", label: "Failed", text: "text-destructive" },
 };
+
+const getStatusMeta = (status?: string | null) => (status && statusMeta[status]) || statusMeta.pending;
 
 function RepositoriesPage() {
   const { add } = Route.useSearch();
@@ -214,9 +217,9 @@ function RepositoriesPage() {
                   </div>
                 </Link>
 
-                <span className={`inline-flex items-center gap-1.5 text-[12px] ${statusMeta[r.status].text}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${statusMeta[r.status].dot}`} />
-                  {statusMeta[r.status].label}
+                <span className={`inline-flex items-center gap-1.5 text-[12px] ${getStatusMeta(r.status).text}`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${getStatusMeta(r.status).dot}`} />
+                  {getStatusMeta(r.status).label}
                 </span>
 
                 <span className="hidden md:inline-flex items-center justify-end gap-1.5 text-[12px] text-muted-foreground">

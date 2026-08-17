@@ -10,8 +10,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/.output/
 frontend/.vite/
+frontend/.wrangler/
 
-# --- editor / OS ---
+# --- editor / OS / backups ---
 .vscode/
 .DS_Store
 Thumbs.db
+AutoScribe-V2/

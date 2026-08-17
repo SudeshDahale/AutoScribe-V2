@@ -70,7 +70,13 @@ const map: Record<string, LogoDef> = {
   ioredis: { icon: SiRedis, color: "#DC382D" },
 };
 
-export function techLogo(name: string): LogoDef {
+export function techLogo(name?: string | null): LogoDef {
+  if (!name || typeof name !== "string") {
+    return {
+      icon: TbApi,
+      color: "#C4E05B",
+    };
+  }
   const key = name.trim().toLowerCase();
   return (
     map[key] ?? {
@@ -80,17 +86,17 @@ export function techLogo(name: string): LogoDef {
   );
 }
 
-export function TechChip({ name }: { name: string }) {
+export function TechChip({ name }: { name?: string | null }) {
   const { icon: Icon, color } = techLogo(name);
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-md bg-surface-2 border border-border">
       <Icon className="w-3.5 h-3.5" style={{ color }} />
-      <span className="text-foreground/85">{name}</span>
+      <span className="text-foreground/85">{name || "Code"}</span>
     </span>
   );
 }
 
-export function TechIcon({ name, className }: { name: string; className?: string }) {
+export function TechIcon({ name, className }: { name?: string | null; className?: string }) {
   const { icon: Icon, color } = techLogo(name);
   return <Icon className={className ?? "w-4 h-4"} style={{ color }} />;
 }

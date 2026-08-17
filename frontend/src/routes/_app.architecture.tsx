@@ -44,7 +44,7 @@ function Architecture() {
     queryKey: ["architecture", repoId],
     queryFn: async () => {
       const res = await fetch(`/api/repos/${repoId}/architecture`);
-      if (!res.ok) throw new Error("Failed to load architecture");
+      if (!res.ok) return null;
       return res.json() as Promise<ApiArchitectureResponse>;
     },
     enabled: !!repoId,
@@ -57,22 +57,19 @@ function Architecture() {
     const real = apiData ? buildDiagramFromApi(apiData) : [];
     return real.length > 0 ? real : getRepoDiagrams(repoId);
   }, [apiData, repoId]);
-  const [viewId, setViewId] = useState<string>(diagrams[0].id);
-  const view = diagrams.find((v) => v.id === viewId) ?? diagrams[0];
 
-  // Reset the active view when the repository changes so the tabs stay valid.
+  const [viewId, setViewId] = useState<string>("");
+  const activeView = diagrams.find((v) => v.id === viewId) ?? diagrams[0];
+
   const currentRepo = repos.find((r) => r.id === repoId);
-  const activeView =
-    diagrams.find((v) => v.id === viewId) ? view : (setViewId(diagrams[0].id), diagrams[0]);
-
-  const [selectedId, setSelectedId] = useState<string>(activeView.nodes[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState<string>("");
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const selected: GraphNode =
-    activeView.nodes.find((n) => n.id === selectedId) ?? activeView.nodes[0];
-  const SelectedIcon = selected.icon;
-  const related = activeView.edges.filter((e) => e.from === selected.id || e.to === selected.id);
+  const selected: GraphNode | undefined =
+    activeView?.nodes.find((n) => n.id === selectedId) ?? activeView?.nodes[0];
+  const SelectedIcon = selected?.icon;
+  const related = activeView && selected ? activeView.edges.filter((e) => e.from === selected.id || e.to === selected.id) : [];
 
   return (
     <div className="space-y-5">
@@ -184,22 +181,27 @@ function Architecture() {
         </div>
 
         {/* Level 2 — inspector */}
-        <aside
-          className={`rounded-xl border border-border bg-surface-1 divide-y divide-border h-fit ${
-            expanded ? "hidden" : "col-span-12 xl:col-span-4 xl:sticky xl:top-20"
-          }`}
-        >
-          <div className="p-4 flex items-center gap-3">
-            <span className="w-9 h-9 rounded-md bg-surface-2 border border-border flex items-center justify-center shrink-0">
-              <SelectedIcon className="w-4 h-4 text-foreground" strokeWidth={1.75} />
-            </span>
-            <div className="min-w-0">
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                {typeLabel[selected.type]}
+        {selected && (
+          <aside
+            className={`rounded-xl border border-border bg-surface-1 divide-y divide-border h-fit ${
+              expanded ? "hidden" : "col-span-12 xl:col-span-4 xl:sticky xl:top-20"
+            }`}
+          >
+            <div className="p-4 flex items-center gap-3">
+              <span className="w-9 h-9 rounded-md bg-surface-2 border border-border flex items-center justify-center shrink-0">
+                {SelectedIcon ? (
+                  <SelectedIcon className="w-4 h-4 text-foreground" strokeWidth={1.75} />
+                ) : (
+                  <Network className="w-4 h-4 text-foreground" strokeWidth={1.75} />
+                )}
+              </span>
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {typeLabel[selected.type] ?? "Component"}
+                </div>
+                <h2 className="text-[15px] font-semibold truncate">{selected.label}</h2>
               </div>
-              <h2 className="text-[15px] font-semibold truncate">{selected.label}</h2>
             </div>
-          </div>
 
           <div className="p-4 grid grid-cols-3 gap-3 text-center">
             <Stat label="Files" value={String(selected.files)} />
@@ -274,6 +276,7 @@ function Architecture() {
             </button>
           </div>
         </aside>
+        )}
       </div>
     </div>
   );

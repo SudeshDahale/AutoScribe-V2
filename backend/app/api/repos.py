@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.auth import get_current_user
@@ -20,7 +22,9 @@ def _account_token(user: User, db: DBSession) -> str:
 
 @router.get("/github/repos")
 async def github_repos(user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
-    token = _account_token(user, db)
+    # _account_token is sync (DB query) — run it in the thread-pool so it
+    # doesn't block the event loop while we hold the async handler open.
+    token = await run_in_threadpool(_account_token, user, db)
     return await list_user_repos(token)
 
 
@@ -91,6 +95,81 @@ def disconnect_repo(repo_id: int, user: User = Depends(get_current_user), db: DB
     repo = db.query(Repository).filter(Repository.id == repo_id, Repository.user_id == user.id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
-    db.delete(repo)
-    db.commit()
+    try:
+        db.delete(repo)
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Failed to disconnect repository — a database constraint prevented deletion. "
+                "Run the cascade-delete migration (e1a2b3c4d5f6) and try again. "
+                f"Detail: {exc.orig}"
+            ),
+        ) from exc
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Settings endpoints
+# ---------------------------------------------------------------------------
+
+class RepoSettingsPatch(BaseModel):
+    auto_update: bool | None = None
+    update_target: str | None = None
+    branch_name: str | None = None
+
+
+@router.get("/repos/{repo_id}/settings")
+def get_repo_settings(repo_id: int, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+    repo = db.query(Repository).filter(Repository.id == repo_id, Repository.user_id == user.id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    settings = db.query(RepoSettings).filter(RepoSettings.repository_id == repo_id).first()
+    if not settings:
+        # Create default settings row if missing (shouldn't happen in normal flow)
+        settings = RepoSettings(repository_id=repo_id)
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return {
+        "autoUpdate": settings.auto_update,
+        "updateTarget": settings.update_target,
+        "branchName": settings.branch_name,
+    }
+
+
+@router.patch("/repos/{repo_id}/settings")
+def update_repo_settings(
+    repo_id: int,
+    body: RepoSettingsPatch,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    repo = db.query(Repository).filter(Repository.id == repo_id, Repository.user_id == user.id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    settings = db.query(RepoSettings).filter(RepoSettings.repository_id == repo_id).first()
+    if not settings:
+        settings = RepoSettings(repository_id=repo_id)
+        db.add(settings)
+        db.flush()
+
+    if body.auto_update is not None:
+        settings.auto_update = body.auto_update
+    if body.update_target is not None:
+        valid_targets = {"main", "branch", "pr"}
+        if body.update_target not in valid_targets:
+            raise HTTPException(status_code=422, detail=f"update_target must be one of {valid_targets}")
+        settings.update_target = body.update_target
+    if body.branch_name is not None:
+        settings.branch_name = body.branch_name
+
+    db.commit()
+    db.refresh(settings)
+    return {
+        "autoUpdate": settings.auto_update,
+        "updateTarget": settings.update_target,
+        "branchName": settings.branch_name,
+    }

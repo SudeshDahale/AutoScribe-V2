@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.auth import get_current_user
@@ -50,25 +51,37 @@ def _word_count(content: str) -> int:
 
 @router.get("/repos/{repo_id}/documents")
 def list_documents(repo_id: int, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+    """Returns all documents for a repo with their latest version status.
+    Uses a single subquery (window function style via correlated subquery) to
+    avoid the previous N+1 pattern of one query per document."""
     repo = _owned_repo(repo_id, user, db)
-    docs = db.query(Document).filter(Document.repository_id == repo.id).all()
-    out = []
-    for d in docs:
-        latest = (
-            db.query(DocumentVersion)
-            .filter(DocumentVersion.document_id == d.id)
-            .order_by(DocumentVersion.id.desc())
-            .first()
-        )
-        out.append({
+
+    # Subquery: for each document, find the id of its most recent version.
+    latest_version_subq = (
+        select(func.max(DocumentVersion.id))
+        .where(DocumentVersion.document_id == Document.id)
+        .correlate(Document)
+        .scalar_subquery()
+    )
+
+    rows = (
+        db.query(Document, DocumentVersion)
+        .outerjoin(DocumentVersion, DocumentVersion.id == latest_version_subq)
+        .filter(Document.repository_id == repo.id)
+        .all()
+    )
+
+    return [
+        {
             "id": d.id,
             "title": d.title,
             "section": d.section,
             "slug": d.slug,
-            "status": latest.status if latest else "Not generated",
-            "updated": _humanize(latest.created_at) if latest else None,
-        })
-    return out
+            "status": v.status if v else "Not generated",
+            "updated": _humanize(v.created_at) if v else None,
+        }
+        for d, v in rows
+    ]
 
 
 @router.get("/repos/{repo_id}/documents/readme")
@@ -115,6 +128,10 @@ def get_document_versions(repo_id: int, doc_id: int, user: User = Depends(get_cu
 
 @router.get("/documents/log")
 def documents_log(user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+    """Returns document version history.
+    N+1 fix: replaced per-row COUNT query with a window function (row_number)
+    computed in a single SQL statement to determine if a version is the first
+    (created) or a subsequent one (updated)."""
     rows = (
         db.query(DocumentVersion, Document, Repository)
         .join(Document, DocumentVersion.document_id == Document.id)
@@ -125,18 +142,32 @@ def documents_log(user: User = Depends(get_current_user), db: DBSession = Depend
         .all()
     )
 
+    # Count total versions per document in a single query instead of N+1 counts.
+    doc_ids = list({doc.id for _, doc, _ in rows})
+    version_counts: dict[int, int] = {}
+    if doc_ids:
+        count_rows = (
+            db.query(DocumentVersion.document_id, func.count(DocumentVersion.id))
+            .filter(DocumentVersion.document_id.in_(doc_ids))
+            .group_by(DocumentVersion.document_id)
+            .all()
+        )
+        version_counts = {doc_id: cnt for doc_id, cnt in count_rows}
+
+    # Track which versions we've already seen per document (ordered desc),
+    # so we can determine if a given version is the latest ("updated") or first ("created").
+    seen_per_doc: dict[int, int] = {}
     out = []
     for version, doc, repo in rows:
-        version_count = (
-            db.query(DocumentVersion)
-            .filter(DocumentVersion.document_id == doc.id, DocumentVersion.id <= version.id)
-            .count()
-        )
+        seen_per_doc[doc.id] = seen_per_doc.get(doc.id, 0) + 1
+        total = version_counts.get(doc.id, 1)
+        # The earliest version is version number 1; if total == 1 there's only one.
+        is_first = (seen_per_doc[doc.id] == total)
         seconds = max(0, int((datetime.now(timezone.utc) - version.created_at).total_seconds()))
         out.append({
             "id": version.id,
             "title": doc.title,
-            "status": "generated" if version_count == 1 else "updated",
+            "status": "generated" if is_first else "updated",
             "kind": doc.slug.upper(),
             "repo": str(repo.id),
             "trigger": "Repository analysis",

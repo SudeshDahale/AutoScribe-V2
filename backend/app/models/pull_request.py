@@ -10,7 +10,7 @@ class PullRequest(Base):
     __tablename__ = "pull_requests"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
     github_pr_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String)
     branch: Mapped[str] = mapped_column(String)

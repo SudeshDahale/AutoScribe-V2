@@ -30,7 +30,7 @@ class RepoSettings(Base):
     __tablename__ = "repo_settings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), unique=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"), unique=True)
     auto_update: Mapped[bool] = mapped_column(Boolean, default=True)
     update_target: Mapped[str] = mapped_column(String, default="pr")
     branch_name: Mapped[str | None] = mapped_column(String, nullable=True)

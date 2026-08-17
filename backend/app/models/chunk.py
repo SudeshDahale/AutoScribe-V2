@@ -15,7 +15,7 @@ class ChunkEmbedding(Base):
     __tablename__ = "chunk_embeddings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
     file_path: Mapped[str] = mapped_column(String)
     chunk_index: Mapped[int] = mapped_column(Integer)
     chunk_text: Mapped[str] = mapped_column(Text)

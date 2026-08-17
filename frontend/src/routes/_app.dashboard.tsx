@@ -70,7 +70,14 @@ function useDashboard() {
     queryKey: ["dashboard"],
     queryFn: async (): Promise<DashboardData> => {
       const res = await fetch("/api/dashboard");
-      if (!res.ok) throw new Error("Failed to load dashboard");
+      if (!res.ok) {
+        return {
+          repositories: [],
+          activity: [],
+          tokenUsage: { plan: "Free", used: 0, limit: 250_000, resetsIn: "—" },
+          activeRepo: null,
+        };
+      }
       return res.json();
     },
   });

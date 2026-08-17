@@ -10,7 +10,7 @@ class Analysis(Base):
     __tablename__ = "analyses"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"))
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String, default="pending")
     files_analyzed: Mapped[int] = mapped_column(Integer, default=0)
     modules_detected: Mapped[int] = mapped_column(Integer, default=0)

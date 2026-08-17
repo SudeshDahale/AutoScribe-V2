@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import settings
@@ -68,27 +69,33 @@ async def github_callback(request: Request, code: str, state: str, db: DBSession
     login = gh_user["login"]
     email = gh_user.get("email") or f"{login}@users.noreply.github.com"
 
-    user = db.query(User).filter(User.github_login == login).first()
-    if not user:
-        user = User(email=email, github_login=login)
-        db.add(user)
-        db.flush()
+    # All DB operations are sync — run them in a thread-pool so we don't
+    # block the async event loop while waiting for Postgres round trips.
+    def _upsert_user_and_session():
+        user = db.query(User).filter(User.github_login == login).first()
+        if not user:
+            user = User(email=email, github_login=login)
+            db.add(user)
+            db.flush()
 
-    account = db.query(GithubAccount).filter(GithubAccount.user_id == user.id).first()
-    encrypted = encrypt_token(access_token)
-    if account:
-        account.access_token_encrypted = encrypted
-        account.github_login = login
-    else:
-        db.add(GithubAccount(user_id=user.id, github_login=login, access_token_encrypted=encrypted))
+        account = db.query(GithubAccount).filter(GithubAccount.user_id == user.id).first()
+        encrypted = encrypt_token(access_token)
+        if account:
+            account.access_token_encrypted = encrypted
+            account.github_login = login
+        else:
+            db.add(GithubAccount(user_id=user.id, github_login=login, access_token_encrypted=encrypted))
 
-    session_id = secrets.token_urlsafe(32)
-    db.add(UserSession(
-        id=session_id,
-        user_id=user.id,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
-    ))
-    db.commit()
+        session_id = secrets.token_urlsafe(32)
+        db.add(UserSession(
+            id=session_id,
+            user_id=user.id,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS),
+        ))
+        db.commit()
+        return session_id
+
+    session_id = await run_in_threadpool(_upsert_user_and_session)
 
     redirect = Response(status_code=302)
     redirect.headers["Location"] = f"{settings.frontend_url}/connect"

@@ -23,6 +23,7 @@ function Connect() {
   const [selected, setSelected] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => availableRepos.filter((r) => r.name.toLowerCase().includes(query.toLowerCase())),
@@ -34,8 +35,14 @@ function Connect() {
     const repo = availableRepos.find((r) => r.id === selected);
     if (!repo) return;
     setStarting(true);
-    const created = await connect(repo);
-    navigate({ to: "/analyzing", search: { repo: created.id } });
+    setError(null);
+    try {
+      const created = await connect(repo);
+      navigate({ to: "/analyzing", search: { repo: created.id } });
+    } catch (err: any) {
+      setError(err?.message || "Failed to connect repository. Please try again.");
+      setStarting(false);
+    }
   };
 
   return (
@@ -76,6 +83,12 @@ function Connect() {
 
         <h1 className="mt-2 text-[24px] tracking-tight font-semibold">Select a repository</h1>
         <p className="mt-1 text-[13px] text-muted-foreground">Choose one repository. You can connect more later.</p>
+
+        {error && (
+          <div className="mt-4 p-3 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive flex items-center gap-2">
+            <span>{error}</span>
+          </div>
+        )}
 
         <div className="relative mt-5">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />

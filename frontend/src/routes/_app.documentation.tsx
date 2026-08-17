@@ -115,7 +115,7 @@ function docIdToSlug(id: string): string {
 }
 
 function Documentation() {
-  const { repos } = useRepos();
+  const { repos, docHistory } = useRepos();
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [activeDocId, setActiveDocId] = useState("README");
   const [isRegenerating, setIsRegenerating] = useState(false);

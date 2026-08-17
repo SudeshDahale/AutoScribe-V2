@@ -1,12 +1,16 @@
+import json as _json
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.auth import get_current_user
 from app.db.session import get_db
-from app.models import User, Repository, ChatConversation, ChatMessage, ActivityLog, TokenUsage
-from app.services.rag import answer_question, suggested_questions
-from app.services.llm import UsageTracker
+from app.models import User, Repository, ChatConversation, ChatMessage, ActivityLog, TokenUsage, Module as ModuleModel
+from app.services.rag import answer_question, suggested_questions, retrieve_chunks_and_prompt
+from app.services.llm import UsageTracker, _client, ANSWER_SYSTEM_PROMPT
+from app.core.config import settings
 
 router = APIRouter(prefix="/api", tags=["ask"])
 
@@ -105,3 +109,107 @@ def ask(repo_id: int, body: AskBody, user: User = Depends(get_current_user), db:
 
     db.commit()
     return answer
+
+
+@router.post("/repos/{repo_id}/ask/stream")
+def ask_stream(
+    repo_id: int,
+    body: AskBody,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    """Streaming version of /ask. Emits server-sent events:
+    - One `data: {"token": "..."}` line per text token as it arrives.
+    - A final `data: {"done": true, "flow": [], "files": [...], "followups": [...]}` event
+      carrying the structured metadata once the stream finishes.
+    - `data: {"error": "..."}` on failure.
+
+    The non-streaming /ask route is preserved for fallback compatibility.
+    """
+    repo = _owned_repo(repo_id, user, db)
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    # Retrieve context chunks and build the prompt once, before opening the
+    # stream, so we know which files grounded the answer without a second LLM call.
+    top_chunks, prompt = retrieve_chunks_and_prompt(db, repo, question)
+
+    files: list[dict] = []
+    seen_paths: list[str] = []
+    for c in top_chunks:
+        if c.file_path in seen_paths:
+            continue
+        seen_paths.append(c.file_path)
+        parts = c.file_path.split("/")
+        files.append({"name": parts[-1], "path": "/".join(parts[:-1]) or "."})
+    if not files:
+        files = [{"name": "repo-overview", "path": f"{repo.org}/{repo.name}"}]
+
+    def generate():
+        accumulated_text = ""
+        try:
+            stream = _client.chat.completions.create(
+                model=settings.llm_model,
+                max_tokens=1024,
+                messages=[
+                    {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    token = delta.content
+                    accumulated_text += token
+                    yield f"data: {_json.dumps({'token': token})}\n\n"
+
+            # Build lightweight follow-ups from module names — no extra LLM call
+            modules = db.query(ModuleModel).filter(ModuleModel.repository_id == repo.id).limit(3).all()
+            followups = [f"How does the {m.name} module work?" for m in modules]
+            if not followups:
+                followups = ["What's the overall architecture?", "How do I run this?"]
+
+            # Persist the exchange now that the full answer is accumulated
+            conversation = (
+                db.query(ChatConversation)
+                .filter(ChatConversation.repository_id == repo.id)
+                .order_by(ChatConversation.id.desc())
+                .first()
+            )
+            if not conversation:
+                conversation = ChatConversation(repository_id=repo.id)
+                db.add(conversation)
+                db.flush()
+
+            db.add(ChatMessage(conversation_id=conversation.id, role="user", text=question))
+            db.add(ChatMessage(
+                conversation_id=conversation.id,
+                role="assistant",
+                text=accumulated_text,
+                flow=[],
+                files=files,
+                followups=followups,
+            ))
+            db.add(ActivityLog(
+                repository_id=repo.id,
+                text=f'Answered (stream): "{question[:80]}"',
+                type="chat",
+            ))
+            db.commit()
+
+            # Final event with structured metadata
+            yield f"data: {_json.dumps({'done': True, 'flow': [], 'files': files, 'followups': followups})}\n\n"
+
+        except Exception as exc:
+            yield f"data: {_json.dumps({'error': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable nginx response buffering for SSE
+        },
+    )

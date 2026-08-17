@@ -105,7 +105,7 @@ function FormattedMessageText({ text }: { text: string }) {
     <div className="space-y-2 text-[14px] leading-relaxed text-foreground/90 font-sans">
       {parts.map((p, i) =>
         p.type === "code" ? (
-          <CodeBlock key={i} code={p.content} language={p.language} />
+          <CodeBlock key={i} code={p.content} language={p.language || "typescript"} />
         ) : (
           <div key={i} className="whitespace-pre-wrap">
             {p.content.split("\n\n").map((para, j) => (
@@ -125,6 +125,8 @@ function Ask() {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
   const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
   const queryClient = useQueryClient();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -155,22 +157,7 @@ function Ask() {
     enabled: !!repoId,
   });
 
-  const askMutation = useMutation({
-    mutationFn: async (question: string) => {
-      const res = await fetch(`/api/repos/${repoId}/ask`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
-      });
-      if (!res.ok) throw new Error("Failed to get an answer");
-      return res.json() as Promise<Message>;
-    },
-    onSuccess: () => {
-      setPendingQuestion(null);
-      queryClient.invalidateQueries({ queryKey: ["conversation", repoId || ""] });
-    },
-    onError: () => setPendingQuestion(null),
-  });
+  // Remove askMutation, we'll handle streaming manually in handleAsk
 
   const messages = conversationQuery.data?.messages ?? [];
   const suggested = suggestedQuery.data?.questions ?? fallbackSuggestedQuestions;
@@ -179,12 +166,83 @@ function Ask() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, pendingQuestion]);
 
-  function handleAsk(question: string) {
+  async function handleAsk(question: string) {
     const trimmed = question.trim();
-    if (!trimmed || askMutation.isPending || !repoId) return;
+    if (!trimmed || isStreaming || !repoId) return;
+    setIsStreaming(true);
     setPendingQuestion(trimmed);
     setInput("");
-    askMutation.mutate(trimmed);
+    
+    setStreamingMessage({
+      role: "assistant",
+      text: "",
+      flow: [],
+      files: [],
+      followups: []
+    });
+
+    try {
+      const res = await fetch(`/api/repos/${repoId}/ask/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: trimmed }),
+      });
+      
+      if (!res.ok) throw new Error("Failed to get an answer");
+      
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      
+      if (!reader) return;
+      
+      let done = false;
+      let accText = "";
+      
+      // We might get partial chunks that don't end in \n\n
+      let buffer = "";
+      
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          // Keep the last part in buffer if it doesn't end with \n\n
+          buffer = parts.pop() || "";
+          
+          for (const line of parts) {
+            if (line.startsWith("data: ")) {
+              const dataStr = line.slice(6);
+              try {
+                const data = JSON.parse(dataStr);
+                if (data.error) {
+                   console.error(data.error);
+                } else if (data.token) {
+                   accText += data.token;
+                   setStreamingMessage(prev => prev ? { ...prev, text: accText } : null);
+                } else if (data.done) {
+                   setStreamingMessage(prev => prev ? { 
+                      ...prev, 
+                      flow: data.flow, 
+                      files: data.files, 
+                      followups: data.followups 
+                   } : null);
+                }
+              } catch (e) {
+                console.error("Failed to parse SSE event", e, dataStr);
+              }
+            }
+          }
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["conversation", repoId || ""] });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsStreaming(false);
+      setPendingQuestion(null);
+      setStreamingMessage(null);
+    }
   }
 
   function handleRepoChange(nextId: string) {
@@ -418,17 +476,54 @@ function Ask() {
           )}
 
           {pendingQuestion && (
-            <>
-              <div className="flex justify-end">
-                <div className="max-w-[80%] rounded-2xl rounded-tr-xs bg-primary text-primary-foreground px-4 py-3 text-xs md:text-sm font-medium">
-                  {pendingQuestion}
+            <div className="flex justify-end">
+              <div className="max-w-[80%] rounded-2xl rounded-tr-xs bg-primary text-primary-foreground px-4 py-3 text-xs md:text-sm font-medium">
+                {pendingQuestion}
+              </div>
+            </div>
+          )}
+
+          {streamingMessage && (
+            <div className="flex items-start gap-3">
+              <div className="w-7 h-7 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0 mt-1">
+                <Bot className="w-4 h-4 animate-pulse" />
+              </div>
+              <div className="flex-1 min-w-0 space-y-4 rounded-2xl border border-border bg-surface-1 p-5 shadow-xs">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
+                  <span className="text-[11px] font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3" /> AutoScribe Response
+                  </span>
                 </div>
+                {streamingMessage.text ? (
+                  <FormattedMessageText text={streamingMessage.text} />
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                    Searching codebase & generating response...
+                  </div>
+                )}
+
+                {/* Stream files if they come through */}
+                {streamingMessage.files && streamingMessage.files.length > 0 && (
+                  <div className="space-y-2 mt-4 pt-4 border-t border-border/60">
+                    <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                      <Code2 className="w-3.5 h-3.5 text-primary" /> Source Files ({streamingMessage.files.length})
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                      {streamingMessage.files.map((f, i) => (
+                        <div key={f.name + i} className="p-2.5 rounded-lg bg-surface-2 border border-border flex items-center gap-2.5 text-left opacity-70">
+                          <FileCode className="w-4 h-4 text-primary shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-medium truncate text-foreground">{f.name}</div>
+                            <div className="text-[10px] text-muted-foreground truncate">{f.path}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface-1 p-4 text-xs text-muted-foreground">
-                <Loader2 className="w-4 h-4 animate-spin text-primary shrink-0" />
-                Searching codebase chunks & generating response...
-              </div>
-            </>
+            </div>
           )}
 
           <div ref={bottomRef} />
@@ -448,10 +543,10 @@ function Ask() {
             />
             <button
               onClick={() => handleAsk(input)}
-              disabled={askMutation.isPending || !input.trim()}
+              disabled={isStreaming || !input.trim()}
               className="absolute right-1.5 h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:brightness-95 transition disabled:opacity-40"
             >
-              {askMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              {isStreaming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
             </button>
           </div>
           <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">

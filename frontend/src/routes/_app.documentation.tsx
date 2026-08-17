@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { docsNav } from "@/lib/mock-data";
 import { useRepos } from "@/lib/repo-store";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -180,7 +179,7 @@ function MarkdownDocRenderer({ markdown }: { markdown: string }) {
           );
         }
         if (el.type === "code") {
-          return <CodeBlock key={idx} code={el.content} language={el.lang} />;
+          return <CodeBlock key={idx} code={el.content} language={el.lang || "bash"} />;
         }
         if (el.type === "li" || el.type === "li_num") {
           return (
@@ -207,7 +206,40 @@ function Documentation() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [copiedMd, setCopiedMd] = useState(false);
 
-  const activeSlug = docIdToSlug(activeDocId);
+  // Fetch real documents for this repo and build the nav from them.
+  // This query must come before activeSlug/currentDoc because activeSlug
+  // needs docsListData to map a doc title back to its real slug.
+  const { data: docsListData } = useQuery({
+    queryKey: ["documents", repoId],
+    queryFn: async () => {
+      if (!repoId) return [];
+      const res = await fetch(`/api/repos/${repoId}/documents`);
+      if (!res.ok) return [];
+      return res.json() as Promise<{ id: number; title: string; section: string; slug: string; status: string }[]>;
+    },
+    enabled: !!repoId,
+  });
+
+  // Map doc title back to its slug using real data, falling back to the heuristic
+  const activeSlug = useMemo(() => {
+    if (docsListData) {
+      const match = docsListData.find((d) => d.title === activeDocId);
+      if (match) return match.slug;
+    }
+    return docIdToSlug(activeDocId);
+  }, [activeDocId, docsListData]);
+
+  // Group real documents by section — only items that actually exist in the DB appear in the nav
+  const realDocsNav = useMemo(() => {
+    if (!docsListData || docsListData.length === 0) return [];
+    const sections: Record<string, string[]> = {};
+    for (const doc of docsListData) {
+      const sec = doc.section || "Getting Started";
+      if (!sections[sec]) sections[sec] = [];
+      sections[sec].push(doc.title);
+    }
+    return Object.entries(sections).map(([section, items]) => ({ section, items }));
+  }, [docsListData]);
 
   const { data: currentDoc, refetch: refetchDoc, isLoading: isDocLoading } = useQuery({
     queryKey: ["document", repoId, activeSlug],
@@ -261,12 +293,13 @@ function Documentation() {
   }, [fullscreen]);
 
   const filteredNav = useMemo(() => {
-    if (!query) return docsNav;
+    const nav = realDocsNav.length > 0 ? realDocsNav : [];
+    if (!query) return nav;
     const q = query.toLowerCase();
-    return docsNav
+    return nav
       .map((s) => ({ ...s, items: s.items.filter((i) => i.toLowerCase().includes(q)) }))
       .filter((s) => s.items.length > 0);
-  }, [query]);
+  }, [query, realDocsNav]);
 
   const proseSize =
     fontSize === "sm"

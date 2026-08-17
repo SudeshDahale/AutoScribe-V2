@@ -12,6 +12,7 @@ import {
   Network,
   AlertCircle,
   ArrowUpRight,
+  BookOpen,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/dashboard")({
@@ -127,7 +128,13 @@ function Overview() {
             {isLoading ? "Loading…" : `${repositories.length} connected · ${totals.pending} need attention`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <Link
+            to="/documentation"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition shadow-xs"
+          >
+            <BookOpen className="w-4 h-4" /> Documentation Studio
+          </Link>
           <Link
             to="/connect"
             className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-95 transition"
@@ -142,6 +149,29 @@ function Overview() {
           </Link>
         </div>
       </header>
+
+      {/* Core Workflow Callout Banner */}
+      <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-surface-1 to-surface-2 p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="space-y-1.5 max-w-2xl">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-primary text-xs font-medium">
+              <Sparkles className="w-3.5 h-3.5" /> Living Documentation Core Workflow
+            </div>
+            <h2 className="text-xl font-semibold tracking-tight text-foreground">
+              Generate & Keep Repository Docs In Lockstep With Code
+            </h2>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Explore your living README, API References, Architecture Guides, and Developer Runbooks. Automatically push updates directly or open PRs on GitHub.
+            </p>
+          </div>
+          <Link
+            to="/documentation"
+            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:brightness-95 transition shadow-md shrink-0"
+          >
+            <BookOpen className="w-4 h-4" /> Open Documentation Studio <ArrowUpRight className="w-4 h-4" />
+          </Link>
+        </div>
+      </section>
 
       {/* KPI strip — every card is a shortcut into the matching section */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3">

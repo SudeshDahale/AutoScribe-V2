@@ -1,17 +1,18 @@
-# AutoScribe-V2
+# AutoScribe V2
 
-A comprehensive tool for automatic data analysis and reporting.
+A powerful tool for automated documentation and analysis.
 
 ## Overview
 
-AutoScribe-V2 is a monolithic application designed to streamline user management, data analysis, and reporting through a cohesive backend built with Node.js and Python. This project focuses on providing users with an efficient way to analyze data and generate informative reports while ensuring secure session management and robust version control. It is structured to encapsulate various modules that work seamlessly together, delivering a user-friendly experience from authentication to data visualization.
+AutoScribe V2 is designed to facilitate automated documentation and analysis for developers and teams, providing a comprehensive solution that integrates user interactions with backend processing. The project is structured as a monolith, combining a TypeScript-based frontend for an engaging user interface with a Python-based backend that manages business logic and data handling.
 
 ## Features
 
-- User authentication and session management.
-- Data analysis with result retrieval.
-- Dynamic report generation and interactive dashboards.
-- Version control integration for tracking changes.
+- Seamless integration of user interface and business logic.
+- Robust backend services for data analysis and document generation.
+- Support for GitHub repository interactions and pull requests.
+- Real-time analysis and reporting capabilities.
+- Extensive configuration options for customization.
 
 ## Quick Start
 
@@ -19,15 +20,14 @@ AutoScribe-V2 is a monolithic application designed to streamline user management
 git clone https://github.com/SudeshDahale/AutoScribe-V2.git
 cd AutoScribe-V2
 pip install -r backend/requirements.txt
-# Add your environment variables in backend/.env
-yarn install # assuming you have Node.js set up for frontend
-# Start the application
-python backend/app/main.py
+# Ensure to set up the .env configuration
+cd backend
+python main.py
 ```
 
 ## Architecture
 
-The architecture of AutoScribe-V2 follows a monolithic design, which consolidates all application functionalities into a single structure without separating the frontend and backend. This is facilitated by a backend written in Python, providing APIs for user management, data analysis, and reporting while handling session and version control interactions. Each module within the application is interlinked, allowing for smooth operation and management of user requests.
+The AutoScribe V2 architecture is a monolithic design that communicates internally, integrating the frontend and backend seamlessly. The frontend, built with TypeScript, is responsible for user interactions while the backend, developed in Python, handles data processing and business logic via various API endpoints.
 
 ---
 *This file is kept in sync by [AutoScribe](https://github.com) — edits here may be overwritten on the next sync.*

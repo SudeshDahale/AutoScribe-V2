@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,8 +13,23 @@ from app.api.ask import router as ask_router
 from app.api.webhooks import router as webhooks_router
 from app.api.pull_requests import router as pull_requests_router
 from app.api.dashboard import router as dashboard_router
+from app.services.poller import start_autonomous_poller
 
-app = FastAPI(title="AutoScribe API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start autonomous commit poller background worker
+    poller_task = asyncio.create_task(start_autonomous_poller())
+    yield
+    # Cleanup on shutdown
+    poller_task.cancel()
+    try:
+        await poller_task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(title="AutoScribe API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -30,10 +30,14 @@ from app.services.docs import (
     generate_api_reference,
     generate_architecture_doc,
     generate_runbook,
+    api_reference_to_markdown,
+    architecture_to_markdown,
+    runbook_to_markdown,
 )
 from app.services.rag import embed_repository
 from app.services.writeback import write_back_docs
 from app.services.llm import UsageTracker
+
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 
@@ -147,6 +151,7 @@ def run_analysis(repo_id: int, token: str):
         ]
 
         readme_data = None
+        extra_docs: dict[str, str] = {}
         with UsageTracker() as docs_usage:
             for title, section, slug, gen_fn in doc_specs:
                 doc_data = gen_fn(
@@ -156,8 +161,15 @@ def run_analysis(repo_id: int, token: str):
                     modules=result["modules"],
                     sample_files=sample_files,
                 )
+                generated_docs[slug] = doc_data
                 if slug == "readme":
                     readme_data = doc_data
+                elif slug == "api-reference":
+                    extra_docs["docs/api-reference.md"] = api_reference_to_markdown(doc_data)
+                elif slug == "architecture-guide":
+                    extra_docs["docs/architecture-guide.md"] = architecture_to_markdown(doc_data)
+                elif slug == "developer-runbook":
+                    extra_docs["docs/developer-runbook.md"] = runbook_to_markdown(doc_data)
 
                 doc = db.query(Document).filter(Document.repository_id == repo.id, Document.slug == slug).first()
                 if not doc:
@@ -173,16 +185,13 @@ def run_analysis(repo_id: int, token: str):
         total_tokens += docs_usage.total_tokens
 
         # --- Write-back pass (Sprint 8) ---
-        # Pushes the README to GitHub per repo_settings.update_target. Isolated in
-        # its own try/except for the same reason as chat indexing below: a GitHub
-        # API hiccup here (permissions, rate limit, network) shouldn't roll back
-        # the architecture + docs work that already succeeded.
         repo_settings = db.query(RepoSettings).filter(RepoSettings.repository_id == repo.id).first()
         if repo_settings and repo_settings.auto_update:
             try:
-                writeback_result = write_back_docs(token, repo, repo_settings, readme_data)
+                writeback_result = write_back_docs(token, repo, repo_settings, readme_data, extra_docs=extra_docs)
                 if writeback_result["mode"] == "pr":
                     pr_info = writeback_result["pr"]
+
                     existing_pr = (
                         db.query(PullRequest)
                         .filter(

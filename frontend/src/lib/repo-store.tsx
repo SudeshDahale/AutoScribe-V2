@@ -62,6 +62,7 @@ type RepoStore = {
   githubHandle: string | null;
   getSettings: (id: string) => RepoSettings;
   updateSettings: (id: string, patch: Partial<RepoSettings>) => void;
+  loadSettings: (id: string, settings: RepoSettings) => void;
   docHistory: DocHistoryEntry[];
   docHistoryFor: (repoId: string) => DocHistoryEntry[];
 };
@@ -218,6 +219,16 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     [settingsMutation],
   );
 
+  const loadSettings = useCallback(
+    (id: string, settings: RepoSettings) => {
+      setSettingsOverride((prev) => ({
+        ...prev,
+        [id]: settings,
+      }));
+    },
+    [],
+  );
+
   const docHistoryFor = useCallback(
     (repoId: string) => docHistory.filter((h) => h.repoId === repoId),
     [docHistory],
@@ -235,6 +246,7 @@ export function RepoProvider({ children }: { children: ReactNode }) {
     githubHandle: meQuery.data?.github_login ?? null,
     getSettings,
     updateSettings,
+    loadSettings,
     docHistory,
     docHistoryFor,
   };

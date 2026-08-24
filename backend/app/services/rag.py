@@ -17,9 +17,21 @@ TEXT_EXTENSIONS = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rb", ".java", ".rs", ".php",
     ".md", ".json", ".yml", ".yaml", ".toml", ".txt", ".html", ".css", ".sql",
 }
+# Large generated files that blow up embedding token limits
+SKIP_FILENAMES = {
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock",
+    "Gemfile.lock", "poetry.lock", "composer.lock", "go.sum",
+}
+SKIP_EXTENSIONS = {".min.js", ".min.css", ".map", ".wasm"}
+
 
 
 def _is_chunkable(path: str) -> bool:
+    basename = path.rsplit("/", 1)[-1] if "/" in path else path
+    if basename in SKIP_FILENAMES:
+        return False
+    if any(path.endswith(ext) for ext in SKIP_EXTENSIONS):
+        return False
     return any(path.endswith(ext) for ext in TEXT_EXTENSIONS)
 
 

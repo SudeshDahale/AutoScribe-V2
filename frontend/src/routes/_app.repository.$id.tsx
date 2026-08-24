@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRepos, type UpdateTarget } from "@/lib/repo-store";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { LiveDiagram, DiagramLegend } from "@/components/architecture/live-diagram";
@@ -70,13 +70,34 @@ function RepositoryPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { repos, getSettings, updateSettings, docHistoryFor } = useRepos();
+  const { repos, getSettings, updateSettings, loadSettings, docHistoryFor } = useRepos();
   const repo = repos.find((r) => String(r.id) === String(id) || r.githubRepoId === id);
   const [tab, setTab] = useState<(typeof tabs)[number]>("Overview");
   const [confirm, setConfirm] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
   const history = docHistoryFor(id);
   const settings = getSettings(id);
+
+  // Fetch real repo settings from server
+  const { data: settingsData } = useQuery({
+    queryKey: ["repo-settings", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/repos/${id}/settings`);
+      if (!res.ok) throw new Error("Failed to fetch settings");
+      return res.json() as Promise<{ autoUpdate: boolean; updateTarget: UpdateTarget; branchName?: string }>;
+    },
+    enabled: !!id,
+  });
+
+  useEffect(() => {
+    if (settingsData) {
+      loadSettings(id, {
+        autoUpdate: settingsData.autoUpdate,
+        updateTarget: settingsData.updateTarget,
+        branchName: settingsData.branchName,
+      });
+    }
+  }, [settingsData, id, loadSettings]);
 
   // ------------------------------------------------------------------
   // Fetch real architecture + analysis data
@@ -151,6 +172,22 @@ function RepositoryPage() {
       setDisconnectError(err.message);
     },
   });
+
+  // ------------------------------------------------------------------
+  // Check commits & autonomous sync mutation
+  // ------------------------------------------------------------------
+  const syncCommitsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/repos/${id}/sync-commits`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to check commits");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
+
 
   // ------------------------------------------------------------------
   // Architecture diagram nodes/edges
@@ -250,10 +287,19 @@ function RepositoryPage() {
               <Sparkles className="w-3.5 h-3.5" /> Ask AI
             </Link>
             <button
+              onClick={() => syncCommitsMutation.mutate()}
+              disabled={syncCommitsMutation.isPending || repo.status === "analyzing"}
+              className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-surface-2 text-[13px] hover:bg-surface-3 disabled:opacity-50"
+              title="Check GitHub for new commits & sync docs"
+            >
+              <Zap className={`w-3.5 h-3.5 text-amber-400 ${syncCommitsMutation.isPending ? "animate-pulse" : ""}`} />
+              <span className="hidden sm:inline">Sync Commits</span>
+            </button>
+            <button
               onClick={() => reanalyzeMutation.mutate()}
               disabled={reanalyzeMutation.isPending || repo.status === "analyzing"}
               className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md border border-border bg-surface-2 text-[13px] text-muted-foreground hover:text-foreground hover:bg-surface-3 disabled:opacity-50"
-              title="Re-analyze repository"
+              title="Re-analyze full repository"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${reanalyzeMutation.isPending ? "animate-spin" : ""}`} />
             </button>
@@ -265,6 +311,7 @@ function RepositoryPage() {
               <Unplug className="w-3.5 h-3.5" />
             </button>
           </div>
+
         </div>
 
         {/* Key metrics strip */}

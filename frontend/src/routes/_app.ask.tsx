@@ -1,11 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRepos } from "@/lib/repo-store";
+import { z } from "zod";
 import {
   Send,
   FileCode,
   ArrowRight,
+  ArrowUpRight,
   Loader2,
   ChevronDown,
   Plus,
@@ -21,7 +23,14 @@ import {
   Terminal,
 } from "lucide-react";
 
+const searchSchema = z.object({
+  repo: z.string().optional(),
+  conversationId: z.string().optional(),
+  new: z.string().optional(),
+});
+
 export const Route = createFileRoute("/_app/ask")({
+  validateSearch: searchSchema,
   head: () => ({
     meta: [
       { title: "Ask AI · AutoScribe" },
@@ -44,6 +53,11 @@ type Message = {
   files: SourceFile[];
   followups: string[];
 };
+type Conversation = {
+  id: number;
+  title: string;
+  created_at: string;
+};
 
 const fallbackSuggestedQuestions = [
   "Where is authentication implemented?",
@@ -55,52 +69,38 @@ const fallbackSuggestedQuestions = [
 
 function CodeBlock({ code, language }: { code: string; language: string }) {
   const [copied, setCopied] = useState(false);
-
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
   return (
     <div className="my-3 rounded-xl border border-border bg-surface-2 overflow-hidden shadow-xs font-mono text-[12.5px]">
       <div className="flex items-center justify-between px-3.5 py-1.5 bg-surface-3/80 border-b border-border text-muted-foreground text-[11px]">
         <span className="flex items-center gap-1.5 text-foreground/80 font-medium">
           <Terminal className="w-3.5 h-3.5 text-primary" /> {language || "code"}
         </span>
-        <button
-          onClick={handleCopy}
-          className="inline-flex items-center gap-1 hover:text-foreground transition text-[11px]"
-        >
+        <button onClick={handleCopy} className="inline-flex items-center gap-1 hover:text-foreground transition text-[11px]">
           {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
       </div>
-      <pre className="p-4 overflow-x-auto text-foreground/90 leading-relaxed whitespace-pre font-mono">
-        {code}
-      </pre>
+      <pre className="p-4 overflow-x-auto text-foreground/90 leading-relaxed whitespace-pre font-mono">{code}</pre>
     </div>
   );
 }
 
 function FormattedMessageText({ text }: { text: string }) {
   const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
-  const parts = [];
+  const parts: { type: string; content: string; language?: string }[] = [];
   let lastIndex = 0;
   let match;
-
   while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push({ type: "text", content: text.slice(lastIndex, match.index) });
-    }
+    if (match.index > lastIndex) parts.push({ type: "text", content: text.slice(lastIndex, match.index) });
     parts.push({ type: "code", language: match[1] || "typescript", content: match[2].trim() });
     lastIndex = match.index + match[0].length;
   }
-
-  if (lastIndex < text.length) {
-    parts.push({ type: "text", content: text.slice(lastIndex) });
-  }
-
+  if (lastIndex < text.length) parts.push({ type: "text", content: text.slice(lastIndex) });
   return (
     <div className="space-y-2 text-[14px] leading-relaxed text-foreground/90 font-sans">
       {parts.map((p, i) =>
@@ -109,9 +109,7 @@ function FormattedMessageText({ text }: { text: string }) {
         ) : (
           <div key={i} className="whitespace-pre-wrap">
             {p.content.split("\n\n").map((para, j) => (
-              <p key={j} className={j > 0 ? "mt-3" : ""}>
-                {para}
-              </p>
+              <p key={j} className={j > 0 ? "mt-3" : ""}>{para}</p>
             ))}
           </div>
         )
@@ -122,27 +120,54 @@ function FormattedMessageText({ text }: { text: string }) {
 
 function Ask() {
   const { repos } = useRepos();
-  const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
+  const navigate = useNavigate();
+  const search = Route.useSearch();
+  const queryClient = useQueryClient();
+
+  const repoId = search.repo ?? repos[0]?.id ?? "";
+  const conversationId = search.conversationId ? Number(search.conversationId) : null;
+  const isNewSession = search.new === "1";
+
   const [input, setInput] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
   const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
-  const queryClient = useQueryClient();
+  const [activeConvId, setActiveConvId] = useState<number | null>(conversationId);
+
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!repoId && repos[0]?.id) setRepoId(repos[0].id);
-  }, [repos, repoId]);
+    if (!search.repo && repos[0]?.id) {
+      navigate({ to: "/ask", search: { repo: repos[0].id }, replace: true });
+    }
+  }, [repos, search.repo, navigate]);
+
+  useEffect(() => {
+    setActiveConvId(conversationId);
+  }, [conversationId]);
 
   const activeRepo = repos.find((r) => r.id === repoId);
 
-  const conversationQuery = useQuery({
-    queryKey: ["conversation", repoId],
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations", repoId],
     queryFn: async () => {
-      const res = await fetch(`/api/repos/${repoId}/conversation`);
-      if (!res.ok) return { messages: [] as Message[] };
-      return res.json() as Promise<{ messages: Message[] }>;
+      const res = await fetch(`/api/repos/${repoId}/conversations`);
+      if (!res.ok) return [] as Conversation[];
+      return res.json() as Promise<Conversation[]>;
+    },
+    enabled: !!repoId,
+  });
+
+  const conversationQuery = useQuery({
+    queryKey: ["conversation", repoId, activeConvId],
+    queryFn: async () => {
+      const url = activeConvId
+        ? `/api/repos/${repoId}/conversation?conversation_id=${activeConvId}`
+        : `/api/repos/${repoId}/conversation`;
+      const res = await fetch(url);
+      if (!res.ok) return { messages: [] as Message[], conversationId: null };
+      return res.json() as Promise<{ messages: Message[]; conversationId: number | null }>;
     },
     enabled: !!repoId,
   });
@@ -157,10 +182,9 @@ function Ask() {
     enabled: !!repoId,
   });
 
-  // Remove askMutation, we'll handle streaming manually in handleAsk
-
   const messages = conversationQuery.data?.messages ?? [];
   const suggested = suggestedQuery.data?.questions ?? fallbackSuggestedQuestions;
+  const conversations = conversationsQuery.data ?? [];
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -172,61 +196,52 @@ function Ask() {
     setIsStreaming(true);
     setPendingQuestion(trimmed);
     setInput("");
-    
-    setStreamingMessage({
-      role: "assistant",
-      text: "",
-      flow: [],
-      files: [],
-      followups: []
-    });
+    setStreamingMessage({ role: "assistant", text: "", flow: [], files: [], followups: [] });
+
+    let finalConvId = activeConvId;
 
     try {
-      const res = await fetch(`/api/repos/${repoId}/ask/stream`, {
+      const convParam = activeConvId ? `?conversation_id=${activeConvId}` : "";
+      const res = await fetch(`/api/repos/${repoId}/ask/stream${convParam}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmed }),
       });
-      
-      if (!res.ok) throw new Error("Failed to get an answer");
-      
+      if (!res.ok) throw new Error("Failed to connect to AI assistant server");
+
       const reader = res.body?.getReader();
       const decoder = new TextDecoder("utf-8");
-      
-      if (!reader) return;
-      
+      if (!reader) throw new Error("Stream response body unavailable");
+
       let done = false;
       let accText = "";
-      
-      // We might get partial chunks that don't end in \n\n
       let buffer = "";
-      
+
       while (!done) {
         const { value, done: readerDone } = await reader.read();
         done = readerDone;
         if (value) {
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split("\n\n");
-          // Keep the last part in buffer if it doesn't end with \n\n
           buffer = parts.pop() || "";
-          
           for (const line of parts) {
             if (line.startsWith("data: ")) {
               const dataStr = line.slice(6);
               try {
                 const data = JSON.parse(dataStr);
                 if (data.error) {
-                   console.error(data.error);
+                  accText += `\n\n*(Error: ${data.error})*`;
+                  setStreamingMessage((prev) => (prev ? { ...prev, text: accText } : null));
                 } else if (data.token) {
-                   accText += data.token;
-                   setStreamingMessage(prev => prev ? { ...prev, text: accText } : null);
+                  accText += data.token;
+                  setStreamingMessage((prev) => (prev ? { ...prev, text: accText } : null));
                 } else if (data.done) {
-                   setStreamingMessage(prev => prev ? { 
-                      ...prev, 
-                      flow: data.flow, 
-                      files: data.files, 
-                      followups: data.followups 
-                   } : null);
+                  if (data.conversationId) {
+                    finalConvId = data.conversationId;
+                  }
+                  setStreamingMessage((prev) =>
+                    prev ? { ...prev, flow: data.flow, files: data.files, followups: data.followups } : null
+                  );
                 }
               } catch (e) {
                 console.error("Failed to parse SSE event", e, dataStr);
@@ -235,9 +250,26 @@ function Ask() {
           }
         }
       }
-      queryClient.invalidateQueries({ queryKey: ["conversation", repoId || ""] });
-    } catch (e) {
+
+      if (finalConvId) {
+        setActiveConvId(finalConvId);
+        queryClient.invalidateQueries({ queryKey: ["conversation", repoId, finalConvId] });
+        queryClient.invalidateQueries({ queryKey: ["conversations", repoId] });
+        navigate({
+          to: "/ask",
+          search: { repo: repoId, conversationId: String(finalConvId) },
+          replace: true,
+        });
+      }
+    } catch (e: any) {
       console.error(e);
+      setStreamingMessage({
+        role: "assistant",
+        text: `Sorry, an error occurred while processing your request: ${e?.message || "Unknown error"}. Please check your connection or LLM status in Settings.`,
+        flow: [],
+        files: [],
+        followups: [],
+      });
     } finally {
       setIsStreaming(false);
       setPendingQuestion(null);
@@ -246,9 +278,23 @@ function Ask() {
   }
 
   function handleRepoChange(nextId: string) {
-    setRepoId(nextId);
-    setInput("");
+    setActiveConvId(null);
+    navigate({ to: "/ask", search: { repo: nextId }, replace: true });
+  }
+
+  function handleSelectConversation(conv: Conversation) {
+    setActiveConvId(conv.id);
+    navigate({ to: "/ask", search: { repo: repoId, conversationId: String(conv.id) } });
+  }
+
+  function handleNewConversation() {
+    setActiveConvId(null);
+    setStreamingMessage(null);
     setPendingQuestion(null);
+    setInput("");
+    // Don't navigate to new:1 — just clear the conversation state.
+    // The next question will lazily create a new conversation.
+    navigate({ to: "/ask", search: { repo: repoId }, replace: true });
   }
 
   function copyMessage(text: string, idx: number) {
@@ -259,7 +305,7 @@ function Ask() {
 
   return (
     <div className="flex h-[calc(100vh-6.5rem)] rounded-2xl border border-border bg-surface-1 overflow-hidden shadow-sm">
-      {/* Left Sidebar: Threads & Context */}
+      {/* Left Sidebar */}
       <div className="w-64 border-r border-border bg-surface-1/60 flex flex-col h-full shrink-0">
         <div className="p-3 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
@@ -279,9 +325,7 @@ function Ask() {
                   className="w-full appearance-none bg-transparent text-foreground font-medium text-xs pr-4 focus:outline-none cursor-pointer truncate"
                 >
                   {repos.map((r) => (
-                    <option key={r.id} value={r.id} className="bg-background">
-                      {r.name}
-                    </option>
+                    <option key={r.id} value={r.id} className="bg-background">{r.name}</option>
                   ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-0 pointer-events-none" />
@@ -290,32 +334,34 @@ function Ask() {
           )}
 
           <button
-            onClick={() => queryClient.invalidateQueries({ queryKey: ["conversation", repoId] })}
+            onClick={handleNewConversation}
             className="w-full inline-flex items-center justify-center gap-2 h-8 rounded-lg border border-border bg-surface-2 hover:bg-surface-3 text-foreground text-xs font-medium transition"
           >
-            <Plus className="w-3.5 h-3.5 text-primary" /> New Conversation
+            <Plus className="w-3.5 h-3.5 text-primary" />
+            New Conversation
           </button>
         </div>
 
-        {/* Thread History list */}
+        {/* Conversation History */}
         <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-          <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Recent Questions</div>
-          {messages.length === 0 ? (
-            <div className="p-3 text-xs text-muted-foreground text-center">No messages yet.</div>
+          <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">Conversations</div>
+          {conversations.length === 0 ? (
+            <div className="p-3 text-xs text-muted-foreground text-center">No conversations yet.</div>
           ) : (
-            messages
-              .filter((m) => m.role === "user")
-              .slice(-10)
-              .map((m, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => handleAsk(m.text)}
-                  className="w-full flex items-center gap-2 px-2.5 h-8 rounded-lg text-left text-xs text-muted-foreground hover:text-foreground hover:bg-surface-2 transition truncate"
-                >
-                  <MessageSquare className="w-3.5 h-3.5 text-primary shrink-0 opacity-70" />
-                  <span className="truncate">{m.text}</span>
-                </button>
-              ))
+            conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => handleSelectConversation(conv)}
+                className={`w-full flex items-center gap-2 px-2.5 h-9 rounded-lg text-left text-xs transition truncate ${
+                  activeConvId === conv.id
+                    ? "bg-primary/10 text-primary border border-primary/20"
+                    : "text-muted-foreground hover:text-foreground hover:bg-surface-2"
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                <span className="truncate">{conv.title}</span>
+              </button>
+            ))
           )}
         </div>
 
@@ -338,13 +384,12 @@ function Ask() {
             </span>
             <span className="text-[11px] text-muted-foreground hidden sm:inline">• RAG Vector Search</span>
           </div>
-
           <div className="flex items-center gap-2">
             <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: ["conversation", repoId] })}
+              onClick={handleNewConversation}
               className="text-xs text-muted-foreground hover:text-foreground transition inline-flex items-center gap-1"
             >
-              <RefreshCw className="w-3 h-3" /> Reset
+              <RefreshCw className="w-3 h-3" /> New Chat
             </button>
           </div>
         </div>
@@ -362,7 +407,6 @@ function Ask() {
                   Ask AutoScribe AI anything about architecture, route handlers, components, or databases.
                 </p>
               </div>
-
               <div className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
                 {suggested.map((q) => (
                   <button
@@ -396,7 +440,6 @@ function Ask() {
                 <div className="w-7 h-7 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0 mt-1">
                   <Bot className="w-4 h-4" />
                 </div>
-
                 <div className="flex-1 min-w-0 space-y-4 rounded-2xl border border-border bg-surface-1 p-5 shadow-xs">
                   <div className="flex items-center justify-between border-b border-border/60 pb-2.5">
                     <span className="text-[11px] font-semibold text-primary uppercase tracking-wider flex items-center gap-1.5">
@@ -438,18 +481,29 @@ function Ask() {
                         <Code2 className="w-3.5 h-3.5 text-primary" /> Source Files ({msg.files.length})
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                        {msg.files.map((f, i) => (
-                          <div
-                            key={f.name + i}
-                            className="p-2.5 rounded-lg bg-surface-2 border border-border hover:border-primary/40 transition flex items-center gap-2.5 text-left"
-                          >
-                            <FileCode className="w-4 h-4 text-primary shrink-0" />
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-medium truncate text-foreground">{f.name}</div>
-                              <div className="text-[10px] text-muted-foreground truncate">{f.path}</div>
-                            </div>
-                          </div>
-                        ))}
+                        {msg.files.map((f, i) => {
+                          const githubUrl = activeRepo ? `https://github.com/${activeRepo.org}/${activeRepo.name}/blob/${activeRepo.branch}/${f.path}` : "#";
+                          return (
+                            <a
+                              key={f.name + i}
+                              href={githubUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-2.5 rounded-lg bg-surface-2 border border-border hover:border-primary/50 hover:bg-surface-3 transition flex items-center gap-2.5 text-left group"
+                              title={`View ${f.path} on GitHub`}
+                            >
+                              <FileCode className="w-4 h-4 text-primary shrink-0 group-hover:scale-110 transition-transform" />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-medium truncate text-foreground flex items-center gap-1">
+                                  <span>{f.name}</span>
+                                  <ArrowUpRight className="w-3 h-3 text-muted-foreground group-hover:text-primary transition shrink-0 opacity-0 group-hover:opacity-100" />
+                                </div>
+                                <div className="text-[10px] text-muted-foreground truncate">{f.path}</div>
+                              </div>
+                            </a>
+                          );
+                        })}
+
                       </div>
                     </div>
                   )}
@@ -499,11 +553,9 @@ function Ask() {
                 ) : (
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
-                    Searching codebase & generating response...
+                    Searching codebase &amp; generating response...
                   </div>
                 )}
-
-                {/* Stream files if they come through */}
                 {streamingMessage.files && streamingMessage.files.length > 0 && (
                   <div className="space-y-2 mt-4 pt-4 border-t border-border/60">
                     <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
@@ -530,19 +582,28 @@ function Ask() {
         </div>
 
         {/* Input Bar */}
-        <div className="p-3 md:p-4 border-t border-border bg-surface-1/80 space-y-2 shrink-0">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleAsk(input);
+          }}
+          className="p-3 md:p-4 border-t border-border bg-surface-1/80 space-y-2 shrink-0"
+        >
           <div className="relative flex items-center">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleAsk(input);
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleAsk(input);
+                }
               }}
               placeholder={activeRepo ? `Ask anything about ${activeRepo.name}...` : "Ask a technical question..."}
               className="w-full h-11 pl-4 pr-12 rounded-xl bg-surface-2 border border-border text-xs md:text-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition"
             />
             <button
-              onClick={() => handleAsk(input)}
+              type="submit"
               disabled={isStreaming || !input.trim()}
               className="absolute right-1.5 h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center hover:brightness-95 transition disabled:opacity-40"
             >
@@ -553,7 +614,7 @@ function Ask() {
             <span>Press Enter to send</span>
             <span>AutoScribe Vector RAG</span>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

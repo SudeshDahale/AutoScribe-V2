@@ -68,9 +68,17 @@ def get_dashboard(user: User = Depends(get_current_user), db: DBSession = Depend
             "text": a.text,
             "type": a.type,
             "time": _time_ago(a.created_at),
+            "createdAt": a.created_at.isoformat(),
         }
         for a in activity_rows
     ]
+
+    today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    tokens_today = (
+        db.query(func.coalesce(func.sum(TokenUsage.tokens), 0))
+        .filter(TokenUsage.user_id == user.id, TokenUsage.created_at >= today_utc)
+        .scalar()
+    )
 
     total_tokens = (
         db.query(func.coalesce(func.sum(TokenUsage.tokens), 0))
@@ -100,17 +108,130 @@ def get_dashboard(user: User = Depends(get_current_user), db: DBSession = Depend
             "architectureStyle": latest_analysis.architecture_style or [],
         }
 
+    from app.services.quota import quota_manager
+    from app.core.config import settings
+    from app.models import RepoSettings as RepoSettingsModel
+
+    engine_status = quota_manager.get_status()
+
+    # ── Task Board: Currently Working ────────────────────────────────────────
+    # An analysis is "working" when its status is "pending" (running/in-queue).
+    # We get the most recent pending analysis per repo.
+    working_analyses = (
+        db.query(Analysis)
+        .join(Repository, Repository.id == Analysis.repository_id)
+        .filter(Repository.user_id == user.id, Analysis.status.in_(["pending", "running"]))
+        .order_by(Analysis.id.desc())
+        .limit(5)
+        .all()
+    )
+    working = []
+    for a in working_analyses:
+        r = repos_by_id.get(a.repository_id)
+        if r:
+            working.append({
+                "repoId": str(r.id),
+                "repoName": r.name,
+                "org": r.org,
+                "stage": "Analyzing repository...",
+                "startedAt": a.created_at.isoformat() if a.created_at else None,
+                "elapsedSecs": int((datetime.now(timezone.utc) - (a.created_at.replace(tzinfo=timezone.utc) if a.created_at.tzinfo is None else a.created_at)).total_seconds()) if a.created_at else 0,
+            })
+
+    # ── Task Board: Completed ─────────────────────────────────────────────────
+    # Completed analysis events + PR open/update activity events
+    completed_analyses = (
+        db.query(Analysis)
+        .join(Repository, Repository.id == Analysis.repository_id)
+        .filter(Repository.user_id == user.id, Analysis.status == "synced")
+        .order_by(Analysis.completed_at.desc().nullslast())
+        .limit(8)
+        .all()
+    )
+    completed = []
+    for a in completed_analyses:
+        r = repos_by_id.get(a.repository_id)
+        if r:
+            completed.append({
+                "repoId": str(r.id),
+                "repoName": r.name,
+                "org": r.org,
+                "type": "analysis",
+                "label": f"Analysis complete · {r.understanding_score or 0}% understanding",
+                "filesAnalyzed": a.files_analyzed or 0,
+                "docsGenerated": r.docs_count or 0,
+                "time": _time_ago(a.completed_at) if a.completed_at else "recently",
+                "completedAt": a.completed_at.isoformat() if a.completed_at else None,
+            })
+
+    # Also include PR open activity as completed milestones
+    pr_activity = [a for a in activity_rows if a.type == "pr"][:5]
+    for a in pr_activity:
+        r = repos_by_id.get(a.repository_id)
+        if r:
+            completed.append({
+                "repoId": str(a.repository_id),
+                "repoName": r.name,
+                "org": r.org,
+                "type": "pr",
+                "label": a.text,
+                "time": _time_ago(a.created_at),
+                "completedAt": a.created_at.isoformat(),
+            })
+
+    # Sort all completed by time desc and cap
+    completed.sort(key=lambda x: x.get("completedAt") or "", reverse=True)
+    completed = completed[:10]
+
+    # ── Task Board: Queued / Pending ─────────────────────────────────────────
+    # Repos that are pending (never synced) + quota-paused state
+    queued = []
+    for r in repos:
+        is_pending = r.status == "pending" and r.understanding_score == 0
+        is_analyzing = r.status == "analyzing"
+        repo_settings_row = db.query(RepoSettingsModel).filter(RepoSettingsModel.repository_id == r.id).first()
+        auto_update = repo_settings_row.auto_update if repo_settings_row else True
+
+        if is_pending and not is_analyzing:
+            queued.append({
+                "repoId": str(r.id),
+                "repoName": r.name,
+                "org": r.org,
+                "reason": "awaiting_baseline" if auto_update else "auto_update_disabled",
+                "label": "Awaiting first analysis" if auto_update else "Auto-update disabled",
+            })
+
+    # Add quota-paused state as a queued item if engine is paused
+    if engine_status.get("isPaused"):
+        queued.append({
+            "repoId": None,
+            "repoName": "All Repositories",
+            "org": "",
+            "reason": "quota_paused",
+            "label": f"Paused: {engine_status.get('pauseReason', 'API quota limit reached')}",
+            "resumesIn": engine_status.get("resumesIn"),
+        })
+
     return {
         "repositories": [_to_repo_dict(r) for r in repos],
         "activity": activity,
+        "working": working,
+        "completed": completed,
+        "queued": queued,
         "tokenUsage": {
             "plan": "Free",
-            "used": int(total_tokens or 0),
-            "limit": FREE_PLAN_TOKEN_LIMIT,
+            "provider": settings.llm_provider,
+            "used": int(tokens_today or 0),
+            "usedTotal": int(total_tokens or 0),
+            "limit": engine_status.get("dailyLimit", FREE_PLAN_TOKEN_LIMIT),
             "resetsIn": _resets_in(),
+            "isPaused": engine_status.get("isPaused", False),
+            "pauseReason": engine_status.get("pauseReason"),
         },
+        "engine": engine_status,
         "activeRepo": active_repo,
     }
+
 
 
 @router.get("/activity/stream")
@@ -172,6 +293,7 @@ async def activity_stream(user: User = Depends(get_current_user)):
                         "text": row.text,
                         "type": row.type,
                         "time": "just now",
+                        "createdAt": row.created_at.isoformat(),
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
         finally:

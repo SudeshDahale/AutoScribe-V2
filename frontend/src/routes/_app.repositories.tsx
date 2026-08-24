@@ -20,6 +20,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { TechIcon } from "@/lib/tech-logos";
 import { useRepos } from "@/lib/repo-store";
 
@@ -52,8 +53,22 @@ const getStatusMeta = (status?: string | null) => (status && statusMeta[status])
 function RepositoriesPage() {
   const { add } = Route.useSearch();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { repos, disconnect } = useRepos();
   const [query, setQuery] = useState("");
+
+  const reanalyzeMutation = useMutation({
+    mutationFn: async (repoId: string) => {
+      const res = await fetch(`/api/repos/${repoId}/analyze`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to start analysis");
+      return res.json();
+    },
+    onSuccess: (_, repoId) => {
+      queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["analysis", repoId] });
+      queryClient.invalidateQueries({ queryKey: ["architecture", repoId] });
+    },
+  });
   const [filter, setFilter] = useState<"all" | "synced" | "pending" | "analyzing">("all");
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
@@ -268,8 +283,15 @@ function RepositoriesPage() {
                       >
                         <BookText className="w-3.5 h-3.5 text-muted-foreground" /> Open repository
                       </Link>
-                      <button className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-[12.5px] hover:bg-surface-2">
-                        <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" /> Re-analyze now
+                      <button
+                        onClick={() => {
+                          setMenuFor(null);
+                          reanalyzeMutation.mutate(r.id);
+                        }}
+                        disabled={reanalyzeMutation.isPending || r.status === "analyzing"}
+                        className="w-full flex items-center gap-2 px-2.5 h-8 rounded-md text-[12.5px] hover:bg-surface-2 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 text-muted-foreground ${reanalyzeMutation.isPending && reanalyzeMutation.variables === r.id ? "animate-spin" : ""}`} /> Re-analyze now
                       </button>
                       <div className="my-1 h-px bg-border" />
                       <button
@@ -362,12 +384,22 @@ function EmptyState({ connected, onAdd }: { connected: number; onAdd: () => void
 function ConnectDialog({ onClose }: { onClose: () => void }) {
   const { repos, isConnected, connect, disconnect, connecting, availableRepos, githubHandle } = useRepos();
   const [query, setQuery] = useState("");
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const handleConnect = async (repo: GithubRepo) => {
+    setConnectError(null);
+    try {
+      await connect(repo);
+    } catch (err: any) {
+      setConnectError(err?.message || "Failed to connect repository. Please try again.");
+    }
+  };
 
   const list = availableRepos.filter((r) =>
     `${r.org}/${r.name}`.toLowerCase().includes(query.toLowerCase()),
@@ -398,6 +430,13 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {connectError && (
+          <div className="mx-5 mt-4 p-3 rounded-lg border border-destructive/30 bg-destructive/10 text-[12px] text-destructive flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>{connectError}</span>
+          </div>
+        )}
 
         <div className="px-5 py-3 border-b border-border">
           <div className="relative">
@@ -464,7 +503,7 @@ function ConnectDialog({ onClose }: { onClose: () => void }) {
                   </button>
                 ) : (
                   <button
-                    onClick={() => connect(r)}
+                    onClick={() => handleConnect(r)}
                     disabled={busy}
                     className="shrink-0 inline-flex items-center justify-center gap-1.5 h-8 px-3 w-[112px] rounded-md bg-primary text-primary-foreground text-[12px] font-medium hover:brightness-95 disabled:opacity-60"
                   >
@@ -520,8 +559,7 @@ function ConfirmDialog({
       >
         <div className="text-[15px] font-semibold">Disconnect {name}?</div>
         <p className="mt-1.5 text-[13px] text-muted-foreground">
-          AutoScribe stops analysing this repository. Generated documentation is kept and restored
-          if you reconnect.
+          AutoScribe stops analysing this repository. You can reconnect it any time.
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <button

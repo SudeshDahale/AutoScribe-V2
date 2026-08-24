@@ -125,7 +125,73 @@ def get_current_user(request: Request, db: DBSession = Depends(get_db)) -> User:
 
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
-    return {"id": user.id, "email": user.email, "github_login": user.github_login}
+    avatar_url = f"https://github.com/{user.github_login}.png" if user.github_login else None
+    return {
+        "id": user.id,
+        "email": user.email,
+        "github_login": user.github_login,
+        "avatar_url": avatar_url,
+    }
+
+
+@router.get("/profile")
+def profile(user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+    from sqlalchemy import func
+    from app.models import Repository, TokenUsage
+    from app.services.quota import quota_manager
+
+    # Connected repos count
+    repo_count = db.query(Repository).filter(Repository.user_id == user.id).count()
+
+    # Real tokens used all-time
+    tokens_total = (
+        db.query(func.coalesce(func.sum(TokenUsage.tokens), 0))
+        .filter(TokenUsage.user_id == user.id)
+        .scalar()
+    )
+
+    # Real tokens used today (since UTC midnight)
+    today_utc = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    tokens_today = (
+        db.query(func.coalesce(func.sum(TokenUsage.tokens), 0))
+        .filter(TokenUsage.user_id == user.id, TokenUsage.created_at >= today_utc)
+        .scalar()
+    )
+
+    # Breakdown by kind
+    breakdown_rows = (
+        db.query(TokenUsage.kind, func.sum(TokenUsage.tokens))
+        .filter(TokenUsage.user_id == user.id)
+        .group_by(TokenUsage.kind)
+        .all()
+    )
+    breakdown = {row[0]: int(row[1]) for row in breakdown_rows}
+
+    avatar_url = f"https://github.com/{user.github_login}.png" if user.github_login else None
+    engine_status = quota_manager.get_status()
+
+    return {
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "githubLogin": user.github_login,
+            "avatarUrl": avatar_url,
+            "createdAt": user.created_at.isoformat() if user.created_at else None,
+        },
+        "stats": {
+            "connectedRepos": repo_count,
+            "tokensTotal": int(tokens_total or 0),
+            "tokensToday": int(tokens_today or 0),
+            "dailyLimit": engine_status.get("dailyLimit", 250_000),
+            "breakdown": breakdown,
+        },
+        "engine": engine_status,
+        "provider": {
+            "name": settings.llm_provider,
+            "model": settings.llm_model,
+            "isFree": settings.llm_provider in {"groq", "gemini", "ollama"},
+        },
+    }
 
 
 @router.post("/logout")
@@ -135,4 +201,4 @@ def logout(request: Request, response: Response, db: DBSession = Depends(get_db)
         db.query(UserSession).filter(UserSession.id == session_id).delete()
         db.commit()
     response.delete_cookie(SESSION_COOKIE)
-    return {"ok": True}
+    return {"ok": True}

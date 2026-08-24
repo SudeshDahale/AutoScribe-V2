@@ -319,6 +319,7 @@ function Documentation() {
     <div className="flex h-[calc(100vh-6.5rem)] rounded-2xl border border-border bg-surface-1 overflow-hidden shadow-sm">
       {/* 1. Left Section Navigation Sidebar */}
       <div className="w-64 border-r border-border bg-surface-1/70 flex flex-col h-full shrink-0">
+
         <div className="p-3 border-b border-border space-y-2.5">
           <label className="flex items-center gap-2 h-8 px-2.5 rounded-lg border border-border bg-surface-2 text-xs">
             <span className="text-muted-foreground text-xs shrink-0 font-medium">Repo</span>

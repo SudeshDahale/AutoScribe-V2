@@ -1,6 +1,7 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { Menu, PanelLeftClose, PanelLeftOpen, Search, ChevronRight } from "lucide-react";
 import { useRepos } from "@/lib/repo-store";
+import { UserProfileDropdown } from "@/components/layout/user-profile-modal";
 
 const labels: Record<string, string> = {
   dashboard: "Overview",
@@ -88,12 +89,11 @@ export function Topbar({
           <span className="absolute inline-flex h-full w-full rounded-full bg-success opacity-60 pulse-dot" />
           <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-success" />
         </span>
-        Synced
+        Autonomous Engine Active
       </div>
 
-      <div className="w-7 h-7 rounded-full bg-surface-2 border border-border flex items-center justify-center text-foreground text-[11px] font-medium shrink-0">
-        JD
-      </div>
+      <UserProfileDropdown />
     </header>
   );
 }
+

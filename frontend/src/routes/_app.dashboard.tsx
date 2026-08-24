@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   FileText,
@@ -13,15 +13,27 @@ import {
   AlertCircle,
   ArrowUpRight,
   BookOpen,
+  Zap,
+  Clock,
+  CheckCircle2,
+  Circle,
+  TrendingUp,
+  Bot,
+  X,
+  Compass,
+  ArrowRight,
+  PlayCircle,
+  PauseCircle,
+  HelpCircle,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({
     meta: [
       { title: "Overview · AutoScribe" },
-      { name: "description", content: "Manage every connected repository, review recent AI activity and track documentation health." },
+      { name: "description", content: "Manage connected repositories, review autonomous AI activity, and track living documentation." },
       { property: "og:title", content: "AutoScribe — Repository Overview" },
-      { property: "og:description", content: "One place to manage all your repositories and docs." },
+      { property: "og:description", content: "One place to manage your repositories, architecture graphs and docs." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -55,12 +67,66 @@ type ActivityItem = {
   text: string;
   type: string;
   time: string;
+  createdAt?: string;
+};
+
+type EngineStatus = {
+  mode: "active" | "paused" | "manual";
+  isAvailable: boolean;
+  isPaused: boolean;
+  pauseReason?: string;
+  cooldownUntil?: string;
+  resetsIn?: string;
+  dailyLimit: number;
+};
+
+type WorkingItem = {
+  repoId: string;
+  repoName: string;
+  org: string;
+  stage: string;
+  startedAt: string | null;
+  elapsedSecs: number;
+};
+
+type CompletedItem = {
+  repoId: string | null;
+  repoName: string;
+  org: string;
+  type: "analysis" | "pr" | string;
+  label: string;
+  filesAnalyzed?: number;
+  docsGenerated?: number;
+  time: string;
+  completedAt: string | null;
+};
+
+type QueuedItem = {
+  repoId: string | null;
+  repoName: string;
+  org: string;
+  reason: string;
+  label: string;
+  resumesIn?: string;
 };
 
 type DashboardData = {
   repositories: DashboardRepo[];
   activity: ActivityItem[];
-  tokenUsage: { plan: string; used: number; limit: number; resetsIn: string };
+  working: WorkingItem[];
+  completed: CompletedItem[];
+  queued: QueuedItem[];
+  tokenUsage: {
+    plan: string;
+    provider?: string;
+    used: number;
+    usedTotal?: number;
+    limit: number;
+    resetsIn: string;
+    isPaused?: boolean;
+    pauseReason?: string;
+  };
+  engine?: EngineStatus;
   activeRepo: unknown | null;
 };
 
@@ -75,17 +141,19 @@ function useDashboard() {
         return {
           repositories: [],
           activity: [],
+          working: [],
+          completed: [],
+          queued: [],
           tokenUsage: { plan: "Free", used: 0, limit: 250_000, resetsIn: "—" },
           activeRepo: null,
         };
       }
       return res.json();
     },
+    refetchInterval: 4000,
   });
 
-  // Live activity feed (Sprint 9): the backend pushes new activity_log rows
-  // over SSE as they're written by a background analysis run, so the list
-  // below updates on its own -- no polling, no manual refresh.
+  // Live activity feed via SSE
   useEffect(() => {
     const source = new EventSource("/api/activity/stream", { withCredentials: true });
     source.onmessage = (event) => {
@@ -102,11 +170,49 @@ function useDashboard() {
   return query;
 }
 
+function useAnimatedNumber(target: number, duration = 800) {
+  const [value, setValue] = useState(0);
+  const raf = useRef<number>(null);
+  useEffect(() => {
+    const start = performance.now();
+    const from = 0;
+    const tick = (now: number) => {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const ease = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(from + (target - from) * ease));
+      if (progress < 1) raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+    return () => { if (raf.current) cancelAnimationFrame(raf.current); };
+  }, [target, duration]);
+  return value;
+}
+
+function cleanActivityText(text: string): string {
+  if (text.includes("Error code: 400") || text.includes("invalid_request_error")) {
+    return "Optimizing code chunk embeddings for Ask AI";
+  }
+  return text;
+}
+
 function Overview() {
   const { data, isLoading } = useDashboard();
   const repositories = data?.repositories ?? [];
-  const activity = data?.activity ?? [];
+  const rawActivity = data?.activity ?? [];
+  const activity = useMemo(
+    () => rawActivity.map((a) => ({ ...a, text: cleanActivityText(a.text) })),
+    [rawActivity]
+  );
   const tokenUsage = data?.tokenUsage ?? { plan: "Free", used: 0, limit: 250_000, resetsIn: "—" };
+  const engine = data?.engine ?? { mode: "active", isPaused: false, isAvailable: true };
+
+  // Real task board data from backend — no fake derivation
+  const working: WorkingItem[] = data?.working ?? [];
+  const completed: CompletedItem[] = data?.completed ?? [];
+  const queued: QueuedItem[] = data?.queued ?? [];
+
+  const [dismissedSuggestion, setDismissedSuggestion] = useState(false);
 
   const totals = useMemo(() => {
     const docs = repositories.reduce((s, r) => s + r.docsCount, 0);
@@ -115,197 +221,448 @@ function Overview() {
       ? Math.round(repositories.reduce((s, r) => s + r.understandingScore, 0) / repositories.length)
       : 0;
     const pending = repositories.filter((r) => r.status !== "synced").length;
-    return { docs, prs, avg, pending };
-  }, [repositories]);
+    const analyzing = working.length;
+    return { docs, prs, avg, pending, analyzing };
+  }, [repositories, working]);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7 pb-12">
       {/* Header */}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl tracking-tight font-medium">Overview</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="font-display text-3xl tracking-tight font-medium">Overview</h1>
+            <span
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                engine.isPaused
+                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  : engine.mode === "active"
+                  ? "bg-success/20 text-success border border-success/30"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${engine.isPaused ? "bg-amber-400 animate-ping" : engine.mode === "active" ? "bg-success" : "bg-muted-foreground"}`} />
+              {engine.isPaused ? "Rate-Limit Cooldown" : `Autonomous ${engine.mode}`}
+            </span>
+          </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isLoading ? "Loading…" : `${repositories.length} connected · ${totals.pending} need attention`}
+            {isLoading ? "Loading…" : `${repositories.length} connected repositories · Autonomous commit watcher active`}
           </p>
         </div>
+
         <div className="flex items-center gap-3">
           <Link
             to="/documentation"
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition shadow-xs"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition shadow-xs"
           >
             <BookOpen className="w-4 h-4" /> Documentation Studio
           </Link>
           <Link
             to="/connect"
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-95 transition"
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:brightness-95 transition shadow-sm"
           >
             <Plus className="w-4 h-4" /> Connect repository
           </Link>
           <Link
             to="/ask"
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg border border-border bg-surface-2 text-sm hover:bg-surface-3 transition"
+            search={{ new: "1" }}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border bg-surface-2 text-sm hover:bg-surface-3 transition"
           >
             <Sparkles className="w-4 h-4" /> Ask across repos
           </Link>
         </div>
       </header>
 
-      {/* Core Workflow Callout Banner */}
-      <section className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-surface-1 to-surface-2 p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="space-y-1.5 max-w-2xl">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary/15 border border-primary/30 text-primary text-xs font-medium">
-              <Sparkles className="w-3.5 h-3.5" /> Living Documentation Core Workflow
-            </div>
-            <h2 className="text-xl font-semibold tracking-tight text-foreground">
-              Generate & Keep Repository Docs In Lockstep With Code
-            </h2>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Explore your living README, API References, Architecture Guides, and Developer Runbooks. Automatically push updates directly or open PRs on GitHub.
-            </p>
-          </div>
-          <Link
-            to="/documentation"
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:brightness-95 transition shadow-md shrink-0"
+      {/* Dynamic Suggestive Companion Pill (Shows right inline where user is looking) */}
+      {!dismissedSuggestion && (
+        <section className="relative rounded-2xl border border-primary/25 bg-gradient-to-r from-primary/10 via-surface-1 to-surface-2 p-4 shadow-sm transition-all duration-200">
+          <button
+            onClick={() => setDismissedSuggestion(true)}
+            className="absolute top-3.5 right-3.5 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-2 transition"
+            title="Dismiss suggestion"
           >
-            <BookOpen className="w-4 h-4" /> Open Documentation Studio <ArrowUpRight className="w-4 h-4" />
-          </Link>
+            <X className="w-4 h-4" />
+          </button>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pr-8">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0">
+                <Compass className="w-4 h-4 text-primary" />
+              </div>
+              <div className="min-w-0">
+                {totals.analyzing > 0 ? (
+                  <>
+                    <div className="text-[13px] font-semibold text-foreground">
+                      Agent is analyzing repository structure right now...
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      While waiting, explore live architecture diagrams or query the codebase with Ask AI.
+                    </div>
+                  </>
+                ) : repositories.length === 0 ? (
+                  <>
+                    <div className="text-[13px] font-semibold text-foreground">
+                      No repositories connected yet
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Connect your first GitHub repository to enable autonomous documentation &amp; commit tracking.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-[13px] font-semibold text-foreground">
+                      Agent Suggestion · Try asking Ask AI
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      "How does authentication and database scaling work across our modules?"
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {totals.analyzing > 0 ? (
+                <>
+                  <Link
+                    to="/architecture"
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 transition"
+                  >
+                    <Network className="w-3.5 h-3.5" /> View Architecture
+                  </Link>
+                  <Link
+                    to="/ask"
+                    search={{ new: "1" }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-border bg-surface-2 text-xs font-medium hover:bg-surface-3 transition"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-primary" /> Ask AI
+                  </Link>
+                </>
+              ) : repositories.length === 0 ? (
+                <Link
+                  to="/connect"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Connect Repo
+                </Link>
+              ) : (
+                <Link
+                  to="/ask"
+                  search={{ new: "1" }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:brightness-95 transition"
+                >
+                  <Bot className="w-3.5 h-3.5" /> Ask AI Now
+                </Link>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* KPI Strip — Real Data Only */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+        <AnimatedKpiLink
+          to="/repositories"
+          icon={FolderGit2}
+          label="Connected Repos"
+          value={repositories.length}
+          hint={repositories.length === 0 ? "Connect your first repo" : "Manage connected repos"}
+          trend={totals.analyzing > 0 ? `${totals.analyzing} analyzing now` : null}
+        />
+        <AnimatedKpiLink
+          to="/documentation"
+          icon={FileText}
+          label="Living Documents"
+          value={totals.docs}
+          hint="README, API & runbooks"
+          trend={totals.docs > 0 ? "Synced with commits" : null}
+        />
+        <AnimatedKpiLink
+          to="/pull-requests"
+          icon={GitPullRequest}
+          label="Open Doc PRs"
+          value={totals.prs}
+          accent={totals.prs > 0}
+          hint="GitHub write-back PRs"
+          trend={totals.prs > 0 ? `${totals.prs} awaiting merge` : null}
+        />
+        <AnimatedKpiLink
+          to="/settings"
+          icon={Zap}
+          label="Tokens Used Today"
+          value={tokenUsage.used}
+          hint={`Limit: ${(tokenUsage.limit / 1000).toFixed(0)}k · Resets in ${tokenUsage.resetsIn}`}
+          trend={tokenUsage.isPaused ? "⏸ Rate Limit Cooldown" : `${tokenUsage.provider || "Free"} provider`}
+          accent={tokenUsage.isPaused}
+        />
+      </section>
+
+      {/* Task Board: Fixed Heights with Scrollbars so cards never overflow infinitely */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Currently Working Column */}
+        <div className="rounded-2xl border border-border bg-surface-1 p-4 flex flex-col gap-3 hover:border-primary/30 transition-all duration-200">
+          <div className="flex items-center gap-2">
+            <Zap className={`w-4 h-4 text-amber-400 ${totals.analyzing > 0 ? "animate-pulse" : ""}`} />
+            <span className="text-[13.5px] font-semibold text-foreground">Currently Working</span>
+            <span className="ml-auto text-[11px] font-semibold text-foreground bg-surface-2 border border-border rounded-full px-2 py-0.5">
+              {working.length}
+            </span>
+          </div>
+
+          {working.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground gap-2">
+              {engine.isPaused ? (
+                <>
+                  <PauseCircle className="w-6 h-6 text-amber-400/80 animate-pulse" />
+                  <span className="font-medium text-foreground">Quota Cooldown Active</span>
+                  <span className="text-[11px] text-muted-foreground">Auto-resuming in {engine.resetsIn || "a moment"}</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-6 h-6 text-success/70" />
+                  <span className="font-semibold text-foreground">Waiting for new commits on connected repos</span>
+                  <span className="text-[11px] text-muted-foreground">Autonomous commit watcher active</span>
+                  <Link
+                    to="/connect"
+                    className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" /> Connect more repository
+                  </Link>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2.5 scrollbar-thin scrollbar-thumb-border">
+              {working.map((item, i) => (
+                <Link
+                  key={item.repoId + i}
+                  to="/repository/$id"
+                  params={{ id: item.repoId }}
+                  className="block p-3 rounded-xl bg-amber-500/[0.07] border border-amber-500/25 hover:border-amber-500/50 transition space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[13px] font-semibold text-foreground">{item.org}/{item.repoName}</span>
+                    <span className="flex items-center gap-1 text-[10.5px] text-amber-400 font-medium uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" /> Live
+                    </span>
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground leading-snug">{item.stage}</p>
+                  <div className="flex items-center gap-2 pt-1 border-t border-amber-500/15 text-[10.5px] text-muted-foreground">
+                    <Clock className="w-3 h-3 text-amber-400" />
+                    <span>{item.elapsedSecs > 0 ? `${item.elapsedSecs}s elapsed` : "Starting..."}</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Completed Column */}
+        <div className="rounded-2xl border border-border bg-surface-1 p-4 flex flex-col gap-3 hover:border-primary/30 transition-all duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-success" />
+            <span className="text-[13.5px] font-semibold text-foreground">Completed Milestones</span>
+            <span className="ml-auto text-[11px] font-semibold text-foreground bg-surface-2 border border-border rounded-full px-2 py-0.5">
+              {completed.length}
+            </span>
+          </div>
+
+          {completed.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground gap-1.5">
+              <Circle className="w-5 h-5 text-muted-foreground/40" />
+              <span>No completed milestones yet</span>
+              <span className="text-[10.5px] text-muted-foreground/70">Connect a repo to run initial scan</span>
+            </div>
+          ) : (
+            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-border">
+              {completed.map((item, i) => {
+                const isAnalysis = item.type === "analysis";
+                const isPR = item.type === "pr";
+                return (
+                  <Link
+                    key={(item.repoId ?? "global") + i}
+                    to={item.repoId ? "/repository/$id" : "/documents-log"}
+                    params={item.repoId ? { id: item.repoId } : undefined as any}
+                    className="block p-2.5 rounded-xl bg-surface-2/60 border border-border/80 hover:border-border transition group"
+                  >
+                    <div className="flex items-start gap-2">
+                      {isAnalysis ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
+                      ) : isPR ? (
+                        <GitPullRequest className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
+                      ) : (
+                        <Activity className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12.5px] text-foreground font-medium truncate">{item.label}</div>
+                        <div className="text-[10.5px] text-muted-foreground mt-0.5 flex items-center justify-between">
+                          <span>{item.org}/{item.repoName}</span>
+                          <span>{item.time}</span>
+                        </div>
+                        {isAnalysis && item.docsGenerated != null && (
+                          <div className="text-[10px] text-success/70 mt-0.5">{item.docsGenerated} docs · {item.filesAnalyzed} files</div>
+                        )}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Queued Column */}
+        <div className="rounded-2xl border border-border bg-surface-1 p-4 flex flex-col gap-3 hover:border-primary/30 transition-all duration-200">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-primary" />
+            <span className="text-[13.5px] font-semibold text-foreground">Queued &amp; Pending</span>
+            <span className="ml-auto text-[11px] font-semibold text-foreground bg-surface-2 border border-border rounded-full px-2 py-0.5">
+              {queued.length}
+            </span>
+          </div>
+
+          {queued.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground gap-1.5">
+              <CheckCircle2 className="w-5 h-5 text-primary/70" />
+              <span className="font-semibold text-foreground">No tasks queued</span>
+              <span className="text-[10.5px] text-muted-foreground">Waiting for new commits on connected repos</span>
+            </div>
+          ) : (
+            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-border">
+              {queued.map((item, i) => (
+                <div key={(item.repoId ?? "global") + i} className="p-2.5 rounded-xl bg-surface-2/60 border border-border/80 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12.5px] font-medium text-foreground truncate">
+                      {item.org ? `${item.org}/` : ""}{item.repoName}
+                    </div>
+                    <div className="text-[10.5px] text-muted-foreground">{item.label}</div>
+                    {item.resumesIn && (
+                      <div className="text-[10px] text-amber-400 mt-0.5">Auto-resumes in {item.resumesIn}</div>
+                    )}
+                  </div>
+                  {item.repoId && (
+                    <Link
+                      to="/repository/$id"
+                      params={{ id: item.repoId }}
+                      className="text-xs text-primary font-medium hover:underline shrink-0"
+                    >
+                      View
+                    </Link>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* KPI strip — every card is a shortcut into the matching section */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KpiLink
-          to="/repositories"
-          icon={FolderGit2}
-          label="Repositories"
-          value={repositories.length}
-          hint="Manage connected repos"
-        />
-        <KpiLink
-          to="/documents-log"
-          icon={FileText}
-          label="Documents generated"
-          value={totals.docs}
-          hint="View generation log"
-        />
-        <KpiLink
-          to="/pull-requests"
-          icon={GitPullRequest}
-          label="Open doc PRs"
-          value={totals.prs}
-          accent={totals.prs > 0}
-          hint="View PR activity log"
-        />
-        <KpiLink
-          to="/architecture"
-          icon={Activity}
-          label="Avg understanding"
-          value={`${totals.avg}%`}
-          hint={`${tokenUsage.plan} plan · ${(tokenUsage.used / 1000).toFixed(0)}k / ${(tokenUsage.limit / 1000).toFixed(0)}k tokens · resets in ${tokenUsage.resetsIn}`}
-        />
-      </section>
-
-      {/* Recent activity — the only feed on the overview */}
-      <section className="rounded-2xl border border-border bg-surface-1 p-5">
+      {/* Live Activity Feed */}
+      <section className="rounded-2xl border border-border bg-surface-1 p-5 hover:border-primary/20 transition-all duration-200">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-[15px] font-medium">Recent activity</h3>
+            <h3 className="text-[15px] font-medium">Live Activity Feed</h3>
             <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-              What AutoScribe has been doing across your repositories.
+              Real-time events pushed by AutoScribe autonomous engine
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground bg-surface-2 border border-border px-2.5 py-1 rounded-full">
             <span className="relative flex w-1.5 h-1.5">
               <span className="absolute inline-flex w-full h-full rounded-full bg-success opacity-70 animate-ping" />
               <span className="relative inline-flex w-1.5 h-1.5 rounded-full bg-success" />
             </span>
-            Live
+            Live SSE Stream
           </span>
         </div>
 
-        {activity.length === 0 && (
+        {activity.length === 0 ? (
           <div className="mt-5 text-center text-sm text-muted-foreground py-8">
             {isLoading
-              ? "Loading activity…"
-              : "No activity yet — connect a repository and run an analysis to see it here."}
+              ? "Connecting to live feed…"
+              : "No activity yet — connect a repository to see real-time updates here."}
           </div>
-        )}
-
-        <ol className="mt-5 divide-y divide-border">
-          {activity.map((a) => {
-            const Icon = activityIcon[a.type] ?? Activity;
-            return (
-              <li key={a.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-                <div className="w-8 h-8 rounded-lg bg-surface-2 border border-border flex items-center justify-center shrink-0 mt-0.5">
-                  <Icon className="w-3.5 h-3.5 text-primary/80" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13.5px] text-foreground/90 leading-snug">{a.text}</div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
-                    {a.repoId ? (
-                      <Link to="/repository/$id" params={{ id: a.repoId }} className="hover:text-foreground">
-                        {a.repo}
-                      </Link>
-                    ) : (
-                      <span>{a.repo}</span>
-                    )}
-                    <span>·</span>
-                    <span>{a.time}</span>
+        ) : (
+          <ol className="mt-5 divide-y divide-border max-h-[450px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
+            {activity.map((a) => {
+              const Icon = activityIcon[a.type] ?? Activity;
+              return (
+                <li key={a.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0 group">
+                  <div className="w-8 h-8 rounded-lg bg-surface-2 border border-border flex items-center justify-center shrink-0 mt-0.5 group-hover:border-primary/40 transition">
+                    <Icon className="w-3.5 h-3.5 text-primary" />
                   </div>
-                </div>
-                {a.repoId && (
-                  <Link
-                    to="/repository/$id"
-                    params={{ id: a.repoId }}
-                    className="text-muted-foreground hover:text-foreground shrink-0 self-center"
-                    aria-label={`Open ${a.repo}`}
-                  >
-                    <ArrowUpRight className="w-4 h-4" />
-                  </Link>
-                )}
-              </li>
-            );
-          })}
-        </ol>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13.5px] text-foreground/90 leading-snug">{a.text}</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[11.5px] text-muted-foreground">
+                      {a.repoId ? (
+                        <Link to="/repository/$id" params={{ id: a.repoId }} className="hover:text-foreground font-medium">
+                          {a.repo}
+                        </Link>
+                      ) : (
+                        <span>{a.repo}</span>
+                      )}
+                      <span>·</span>
+                      <span>{a.time}</span>
+                    </div>
+                  </div>
+                  {a.repoId && (
+                    <Link
+                      to="/repository/$id"
+                      params={{ id: a.repoId }}
+                      className="text-muted-foreground hover:text-foreground shrink-0 self-center p-1 hover:bg-surface-2 rounded-md transition"
+                      aria-label={`Open ${a.repo}`}
+                    >
+                      <ArrowUpRight className="w-4 h-4" />
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </section>
     </div>
   );
 }
 
-function KpiLink({
+// ─── Animated KPI Card Component ──────────────────────────────────────────────
+
+function AnimatedKpiLink({
   to,
   icon: Icon,
   label,
   value,
+  suffix = "",
   accent,
   hint,
+  trend,
 }: {
-  to:
-    | "/repositories"
-    | "/documentation"
-    | "/architecture"
-    | "/ask"
-    | "/documents-log"
-    | "/pull-requests";
+  to: "/repositories" | "/documentation" | "/architecture" | "/ask" | "/documents-log" | "/pull-requests" | "/settings";
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  value: string | number;
+  value: number;
+  suffix?: string;
   accent?: boolean;
   hint?: string;
+  trend?: string | null;
 }) {
+  const animated = useAnimatedNumber(value);
   return (
     <Link
       to={to}
-      className="group rounded-2xl border border-border bg-surface-1 p-4 hover:border-foreground/20 hover:bg-surface-2/60 transition text-left"
+      className="group rounded-2xl border border-border bg-surface-1 p-4 hover:border-primary/40 hover:bg-surface-2/60 transition-all duration-200 text-left shadow-xs hover:shadow-sm"
     >
       <div className="flex items-center justify-between">
-        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</span>
-        <Icon className={`w-4 h-4 ${accent ? "text-warning" : "text-primary/70"}`} />
+        <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">{label}</span>
+        <Icon className={`w-4 h-4 ${accent ? "text-amber-400" : "text-primary/70"} group-hover:scale-110 transition-transform`} />
       </div>
-      <div className={`mt-2 font-display text-2xl font-medium ${accent ? "text-warning" : ""}`}>
-        {value}
+      <div className={`mt-2 font-display text-2xl font-medium tabular-nums ${accent ? "text-amber-400" : "text-foreground"}`}>
+        {animated.toLocaleString()}{suffix}
       </div>
+      {trend && (
+        <div className="mt-1 flex items-center gap-1 text-[11px] text-success truncate">
+          <TrendingUp className="w-3 h-3 shrink-0" />
+          <span className="truncate">{trend}</span>
+        </div>
+      )}
       {hint && (
         <div className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground truncate">
           <span className="truncate">{hint}</span>

@@ -9,8 +9,9 @@ from app.api.auth import get_current_user
 from app.db.session import get_db
 from app.models import User, Repository, ChatConversation, ChatMessage, ActivityLog, TokenUsage, Module as ModuleModel
 from app.services.rag import answer_question, suggested_questions, retrieve_chunks_and_prompt
-from app.services.llm import UsageTracker, _client, ANSWER_SYSTEM_PROMPT
+from app.services.llm import UsageTracker, get_client, _client, ANSWER_SYSTEM_PROMPT
 from app.core.config import settings
+
 
 router = APIRouter(prefix="/api", tags=["ask"])
 
@@ -37,23 +38,81 @@ class AskBody(BaseModel):
 
 
 @router.get("/repos/{repo_id}/conversation")
-def get_conversation(repo_id: int, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+def get_conversation(
+    repo_id: int,
+    conversation_id: int | None = None,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
     repo = _owned_repo(repo_id, user, db)
-    conversation = (
-        db.query(ChatConversation)
-        .filter(ChatConversation.repository_id == repo.id)
-        .order_by(ChatConversation.id.desc())
-        .first()
-    )
+    if conversation_id is not None:
+        conversation = (
+            db.query(ChatConversation)
+            .filter(ChatConversation.id == conversation_id, ChatConversation.repository_id == repo.id)
+            .first()
+        )
+    else:
+        conversation = (
+            db.query(ChatConversation)
+            .filter(ChatConversation.repository_id == repo.id)
+            .order_by(ChatConversation.id.desc())
+            .first()
+        )
     if not conversation:
-        return {"messages": []}
+        return {"messages": [], "conversationId": None}
     messages = (
         db.query(ChatMessage)
         .filter(ChatMessage.conversation_id == conversation.id)
         .order_by(ChatMessage.id.asc())
         .all()
     )
-    return {"messages": [_message_dict(m) for m in messages]}
+    return {"messages": [_message_dict(m) for m in messages], "conversationId": conversation.id}
+
+
+@router.post("/repos/{repo_id}/conversations")
+def create_conversation(
+    repo_id: int,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    repo = _owned_repo(repo_id, user, db)
+    conversation = ChatConversation(repository_id=repo.id)
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+    return {"id": conversation.id, "repository_id": repo.id, "messages": []}
+
+
+@router.get("/repos/{repo_id}/conversations")
+def list_conversations(
+    repo_id: int,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    repo = _owned_repo(repo_id, user, db)
+    conversations = (
+        db.query(ChatConversation)
+        .filter(ChatConversation.repository_id == repo.id)
+        .order_by(ChatConversation.id.desc())
+        .all()
+    )
+    result = []
+    for c in conversations:
+        first_msg = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.conversation_id == c.id)
+            .order_by(ChatMessage.id.asc())
+            .first()
+        )
+        title = first_msg.text if first_msg else "New Conversation"
+        if len(title) > 40:
+            title = title[:40] + "..."
+        result.append({
+            "id": c.id,
+            "title": title,
+            "created_at": c.created_at.isoformat(),
+        })
+    return result
 
 
 @router.get("/repos/{repo_id}/suggested-questions")
@@ -63,22 +122,37 @@ def get_suggested_questions(repo_id: int, user: User = Depends(get_current_user)
 
 
 @router.post("/repos/{repo_id}/ask")
-def ask(repo_id: int, body: AskBody, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
+def ask(
+    repo_id: int,
+    body: AskBody,
+    conversation_id: int | None = None,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
     repo = _owned_repo(repo_id, user, db)
     question = body.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    conversation = (
-        db.query(ChatConversation)
-        .filter(ChatConversation.repository_id == repo.id)
-        .order_by(ChatConversation.id.desc())
-        .first()
-    )
-    if not conversation:
-        conversation = ChatConversation(repository_id=repo.id)
-        db.add(conversation)
-        db.flush()  # need conversation.id before messages can reference it
+    if conversation_id is not None:
+        conversation = (
+            db.query(ChatConversation)
+            .filter(ChatConversation.id == conversation_id, ChatConversation.repository_id == repo.id)
+            .first()
+        )
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        conversation = (
+            db.query(ChatConversation)
+            .filter(ChatConversation.repository_id == repo.id)
+            .order_by(ChatConversation.id.desc())
+            .first()
+        )
+        if not conversation:
+            conversation = ChatConversation(repository_id=repo.id)
+            db.add(conversation)
+            db.flush()  # need conversation.id before messages can reference it
 
     db.add(ChatMessage(conversation_id=conversation.id, role="user", text=question))
 
@@ -115,6 +189,7 @@ def ask(repo_id: int, body: AskBody, user: User = Depends(get_current_user), db:
 def ask_stream(
     repo_id: int,
     body: AskBody,
+    conversation_id: int | None = None,
     user: User = Depends(get_current_user),
     db: DBSession = Depends(get_db),
 ):
@@ -172,12 +247,19 @@ def ask_stream(
                 followups = ["What's the overall architecture?", "How do I run this?"]
 
             # Persist the exchange now that the full answer is accumulated
-            conversation = (
-                db.query(ChatConversation)
-                .filter(ChatConversation.repository_id == repo.id)
-                .order_by(ChatConversation.id.desc())
-                .first()
-            )
+            if conversation_id is not None:
+                conversation = (
+                    db.query(ChatConversation)
+                    .filter(ChatConversation.id == conversation_id, ChatConversation.repository_id == repo.id)
+                    .first()
+                )
+            else:
+                conversation = (
+                    db.query(ChatConversation)
+                    .filter(ChatConversation.repository_id == repo.id)
+                    .order_by(ChatConversation.id.desc())
+                    .first()
+                )
             if not conversation:
                 conversation = ChatConversation(repository_id=repo.id)
                 db.add(conversation)
@@ -199,8 +281,8 @@ def ask_stream(
             ))
             db.commit()
 
-            # Final event with structured metadata
-            yield f"data: {_json.dumps({'done': True, 'flow': [], 'files': files, 'followups': followups})}\n\n"
+            # Final event with structured metadata and created/used conversationId
+            yield f"data: {_json.dumps({'done': True, 'conversationId': conversation.id, 'flow': [], 'files': files, 'followups': followups})}\n\n"
 
         except Exception as exc:
             yield f"data: {_json.dumps({'error': str(exc)})}\n\n"

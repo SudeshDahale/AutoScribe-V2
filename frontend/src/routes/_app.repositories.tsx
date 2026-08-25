@@ -22,7 +22,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { TechIcon } from "@/lib/tech-logos";
-import { useRepos } from "@/lib/repo-store";
+import { useRepos, type GithubRepo } from "@/lib/repo-store";
 
 export const Route = createFileRoute("/_app/repositories")({
   validateSearch: (search: Record<string, unknown>) => ({

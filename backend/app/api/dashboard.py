@@ -12,6 +12,7 @@ from app.api.auth import get_current_user
 from app.api.repos import _to_repo_dict
 from app.db.session import SessionLocal, get_db
 from app.models import User, Repository, Analysis, ActivityLog, TokenUsage
+from app.services.agent_engine import agent_engine
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
@@ -303,4 +304,26 @@ async def activity_stream(user: User = Depends(get_current_user)):
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    )
+
+
+# ─── Agent Engine Endpoints ───────────────────────────────────────────────────
+
+@router.get("/agent/events")
+def get_agent_events(user: User = Depends(get_current_user)):
+    """Returns the live event log from the in-memory agent engine."""
+    return {"events": agent_engine.snapshot_events()}
+
+
+@router.get("/agent/tasks")
+def get_agent_tasks(user: User = Depends(get_current_user)):
+    """Returns the current priority task queue."""
+    return {"tasks": agent_engine.snapshot_queue()}
+
+
+@router.get("/agent/execution")
+def get_agent_execution(user: User = Depends(get_current_user)):
+    """Returns the current (or most recent) agent execution with step-by-step progress."""
+    execution = agent_engine.snapshot_execution()
+    history = agent_engine.snapshot_history()
+    return {"execution": execution, "history": history}

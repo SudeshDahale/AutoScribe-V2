@@ -81,7 +81,7 @@ function SettingsPage() {
   });
 
   const engine = profile?.engine ?? { mode: "active", isPaused: false, dailyLimit: 250_000 };
-  const stats = profile?.stats ?? { tokensToday: 0, dailyLimit: 250_000, connectedRepos: 0 };
+  const stats = profile?.stats ?? { tokensToday: 0, tokensTotal: 0, dailyLimit: 250_000, connectedRepos: 0 };
   const provider = profile?.provider ?? { name: "groq", isFree: true, model: "llama-3.3-70b-versatile" };
 
   const [selectedProvider, setSelectedProvider] = useState("groq");

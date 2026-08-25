@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+﻿import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -30,9 +30,9 @@ import {
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({
     meta: [
-      { title: "Overview · AutoScribe" },
+      { title: "Overview ┬╖ AutoScribe" },
       { name: "description", content: "Manage connected repositories, review autonomous AI activity, and track living documentation." },
-      { property: "og:title", content: "AutoScribe — Repository Overview" },
+      { property: "og:title", content: "AutoScribe ΓÇö Repository Overview" },
       { property: "og:description", content: "One place to manage your repositories, architecture graphs and docs." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -144,7 +144,7 @@ function useDashboard() {
           working: [],
           completed: [],
           queued: [],
-          tokenUsage: { plan: "Free", used: 0, limit: 250_000, resetsIn: "—" },
+          tokenUsage: { plan: "Free", used: 0, limit: 250_000, resetsIn: "ΓÇö" },
           activeRepo: null,
         };
       }
@@ -204,10 +204,10 @@ function Overview() {
     () => rawActivity.map((a) => ({ ...a, text: cleanActivityText(a.text) })),
     [rawActivity]
   );
-  const tokenUsage = data?.tokenUsage ?? { plan: "Free", used: 0, limit: 250_000, resetsIn: "—" };
+  const tokenUsage = data?.tokenUsage ?? { plan: "Free", used: 0, limit: 250_000, resetsIn: "ΓÇö" };
   const engine = data?.engine ?? { mode: "active", isPaused: false, isAvailable: true };
 
-  // Real task board data from backend — no fake derivation
+  // Real task board data from backend ΓÇö no fake derivation
   const working: WorkingItem[] = data?.working ?? [];
   const completed: CompletedItem[] = data?.completed ?? [];
   const queued: QueuedItem[] = data?.queued ?? [];
@@ -246,7 +246,7 @@ function Overview() {
             </span>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isLoading ? "Loading…" : `${repositories.length} connected repositories · Autonomous commit watcher active`}
+            {isLoading ? "LoadingΓÇª" : `${repositories.length} connected repositories ┬╖ Autonomous commit watcher active`}
           </p>
         </div>
 
@@ -311,7 +311,7 @@ function Overview() {
                 ) : (
                   <>
                     <div className="text-[13px] font-semibold text-foreground">
-                      Agent Suggestion · Try asking Ask AI
+                      Agent Suggestion ┬╖ Try asking Ask AI
                     </div>
                     <div className="text-xs text-muted-foreground">
                       "How does authentication and database scaling work across our modules?"
@@ -359,7 +359,7 @@ function Overview() {
         </section>
       )}
 
-      {/* KPI Strip — Real Data Only */}
+      {/* KPI Strip ΓÇö Real Data Only */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
         <AnimatedKpiLink
           to="/repositories"
@@ -391,8 +391,8 @@ function Overview() {
           icon={Zap}
           label="Tokens Used Today"
           value={tokenUsage.used}
-          hint={`Limit: ${(tokenUsage.limit / 1000).toFixed(0)}k · Resets in ${tokenUsage.resetsIn}`}
-          trend={tokenUsage.isPaused ? "⏸ Rate Limit Cooldown" : `${tokenUsage.provider || "Free"} provider`}
+          hint={`Limit: ${(tokenUsage.limit / 1000).toFixed(0)}k ┬╖ Resets in ${tokenUsage.resetsIn}`}
+          trend={tokenUsage.isPaused ? "ΓÅ╕ Rate Limit Cooldown" : `${tokenUsage.provider || "Free"} provider`}
           accent={tokenUsage.isPaused}
         />
       </section>
@@ -500,7 +500,7 @@ function Overview() {
                           <span>{item.time}</span>
                         </div>
                         {isAnalysis && item.docsGenerated != null && (
-                          <div className="text-[10px] text-success/70 mt-0.5">{item.docsGenerated} docs · {item.filesAnalyzed} files</div>
+                          <div className="text-[10px] text-success/70 mt-0.5">{item.docsGenerated} docs ┬╖ {item.filesAnalyzed} files</div>
                         )}
                       </div>
                     </div>
@@ -577,8 +577,8 @@ function Overview() {
         {activity.length === 0 ? (
           <div className="mt-5 text-center text-sm text-muted-foreground py-8">
             {isLoading
-              ? "Connecting to live feed…"
-              : "No activity yet — connect a repository to see real-time updates here."}
+              ? "Connecting to live feedΓÇª"
+              : "No activity yet ΓÇö connect a repository to see real-time updates here."}
           </div>
         ) : (
           <ol className="mt-5 divide-y divide-border max-h-[450px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-border">
@@ -599,7 +599,7 @@ function Overview() {
                       ) : (
                         <span>{a.repo}</span>
                       )}
-                      <span>·</span>
+                      <span>┬╖</span>
                       <span>{a.time}</span>
                     </div>
                   </div>
@@ -623,7 +623,7 @@ function Overview() {
   );
 }
 
-// ─── Animated KPI Card Component ──────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Animated KPI Card Component ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 
 function AnimatedKpiLink({
   to,

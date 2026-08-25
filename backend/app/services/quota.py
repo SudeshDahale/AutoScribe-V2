@@ -26,6 +26,11 @@ class QuotaManager:
                 self._pause_reason = None
         return self._mode
 
+    def reset(self):
+        self._mode = "active"
+        self._cooldown_until = None
+        self._pause_reason = None
+
     def set_mode(self, mode: EngineMode, reason: str | None = None):
         self._mode = mode
         if mode != "paused":

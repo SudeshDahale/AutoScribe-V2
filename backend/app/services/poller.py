@@ -7,6 +7,7 @@ from app.core.security import decrypt_token
 from app.db.session import SessionLocal
 from app.models import Repository, RepoSettings, GithubAccount, ActivityLog
 from app.services.quota import quota_manager
+from app.services.agent_engine import agent_engine
 
 # In-memory lock set to prevent concurrent analysis runs for the same repository
 _analyzing_locks: set[int] = set()
@@ -122,6 +123,14 @@ async def check_repo_commits(repo_id: int) -> dict:
             repo.status = "synced"
             repo.last_activity_text = f"Commit {sha[:7]} inspected: Living docs in sync"
             db.commit()
+            # Emit low-signal event (marked not relevant, won't generate task)
+            agent_engine.capture_event(
+                source="github",
+                type="scan_skipped",
+                title=f"Commit {sha[:7]} — no doc impact",
+                detail=rationale,
+                repo_name=f"{repo.org}/{repo.name}",
+            )
             return {
                 "ok": True,
                 "commit": sha[:7],
@@ -136,15 +145,46 @@ async def check_repo_commits(repo_id: int) -> dict:
             type="scan",
         ))
         db.commit()
+        # Emit high-signal commit event — agent will generate a task
+        agent_engine.capture_event(
+            source="github",
+            type="commit",
+            title=f"New commit: {message[:60]}",
+            detail=f"{author} pushed [{sha[:7]}] — {rationale}",
+            repo_name=f"{repo.org}/{repo.name}",
+        )
 
         if auto_update and quota_manager.is_available():
             from app.api.analyze import run_analysis
             _analyzing_locks.add(repo.id)
+            # Emit analysis_started event to agent engine
+            agent_engine.capture_event(
+                source="analysis",
+                type="analysis_started",
+                title=f"Analysis started for {repo.org}/{repo.name}",
+                detail=f"Triggered by commit {sha[:7]}: {message}",
+                repo_name=f"{repo.org}/{repo.name}",
+            )
             try:
                 # Run analysis in background thread with mutex protection
                 def _run():
                     try:
                         run_analysis(repo.id, token)
+                        agent_engine.capture_event(
+                            source="analysis",
+                            type="analysis_complete",
+                            title=f"Analysis complete for {repo.org}/{repo.name}",
+                            detail="Documentation suite updated and synced.",
+                            repo_name=f"{repo.org}/{repo.name}",
+                        )
+                    except Exception as exc:
+                        agent_engine.capture_event(
+                            source="analysis",
+                            type="analysis_failed",
+                            title=f"Analysis failed for {repo.org}/{repo.name}",
+                            detail=str(exc)[:120],
+                            repo_name=f"{repo.org}/{repo.name}",
+                        )
                     finally:
                         _analyzing_locks.discard(repo.id)
 
@@ -159,6 +199,15 @@ async def check_repo_commits(repo_id: int) -> dict:
             except Exception:
                 _analyzing_locks.discard(repo.id)
                 raise
+
+        if not quota_manager.is_available():
+            agent_engine.capture_event(
+                source="system",
+                type="quota_paused",
+                title="Agent paused — API quota limit reached",
+                detail="Autonomous engine will resume after cooldown.",
+                repo_name=f"{repo.org}/{repo.name}",
+            )
 
         return {
             "ok": True,

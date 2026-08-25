@@ -261,6 +261,7 @@ export function UserProfileDropdown() {
             </Link>
             <Link
               to="/repositories"
+              search={{ add: undefined }}
               onClick={() => setIsOpen(false)}
               className="flex items-center gap-2 px-2.5 py-2 rounded-lg text-[12.5px] text-foreground hover:bg-surface-2 transition"
             >

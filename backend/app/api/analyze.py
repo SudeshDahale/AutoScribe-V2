@@ -37,6 +37,8 @@ from app.services.docs import (
 from app.services.rag import embed_repository
 from app.services.writeback import write_back_docs
 from app.services.llm import UsageTracker
+from app.services.quota import quota_manager
+from app.services.agent_engine import agent_engine
 
 
 router = APIRouter(prefix="/api", tags=["analysis"])
@@ -152,6 +154,7 @@ def run_analysis(repo_id: int, token: str):
 
         readme_data = None
         extra_docs: dict[str, str] = {}
+        generated_docs = {}
         with UsageTracker() as docs_usage:
             for title, section, slug, gen_fn in doc_specs:
                 doc_data = gen_fn(
@@ -267,8 +270,15 @@ def run_analysis(repo_id: int, token: str):
         repo.last_activity_text = f"Understanding score {calculated_score}% · {result.get('rationale', 'Analysis complete')}"[:180]
 
         db.commit()
-    except Exception:
+    except Exception as exc:
         db.rollback()
+        err_msg = str(exc)
+        is_quota_err = "429" in err_msg or "rate limit" in err_msg.lower() or "quota" in err_msg.lower()
+
+        if is_quota_err:
+            quota_manager.record_rate_limit(retry_after_seconds=3600, reason="API rate limit / token budget reached")
+            agent_engine.pause_all_tasks_for_quota("API rate limit / token budget reached")
+
         failed = (
             db.query(Analysis)
             .filter(Analysis.repository_id == repo_id)
@@ -276,12 +286,13 @@ def run_analysis(repo_id: int, token: str):
             .first()
         )
         if failed:
-            failed.status = "failed"
+            failed.status = "pending" if is_quota_err else "failed"
         broken_repo = db.query(Repository).filter(Repository.id == repo_id).first()
         if broken_repo:
             broken_repo.status = "pending"
         db.commit()
-        raise
+        if not is_quota_err:
+            raise
     finally:
         db.close()
 

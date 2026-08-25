@@ -14,17 +14,20 @@ from app.api.webhooks import router as webhooks_router
 from app.api.pull_requests import router as pull_requests_router
 from app.api.dashboard import router as dashboard_router
 from app.services.poller import start_autonomous_poller
+from app.services.agent_engine import agent_engine
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Start autonomous commit poller background worker
+    # Start autonomous commit poller & agent worker background tasks
     poller_task = asyncio.create_task(start_autonomous_poller())
+    agent_task = asyncio.create_task(agent_engine.start_background_worker())
     yield
     # Cleanup on shutdown
     poller_task.cancel()
+    agent_task.cancel()
     try:
-        await poller_task
+        await asyncio.gather(poller_task, agent_task, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 

@@ -5,6 +5,7 @@ import httpx
 from app.core.config import settings
 from app.core.security import decrypt_token
 from app.db.session import SessionLocal
+<<<<<<< HEAD
 from app.models import Repository, RepoSettings, GithubAccount, ActivityLog, Document
 from app.services.quota import quota_manager
 from app.services.agent_engine import agent_engine
@@ -17,6 +18,11 @@ from app.services.signals import (
     caption_signals,
     store_signals,
 )
+=======
+from app.models import Repository, RepoSettings, GithubAccount, ActivityLog
+from app.services.quota import quota_manager
+from app.services.agent_engine import agent_engine
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 # In-memory lock set to prevent concurrent analysis runs for the same repository
 _analyzing_locks: set[int] = set()
@@ -119,6 +125,7 @@ async def check_repo_commits(repo_id: int) -> dict:
         files = detail_resp.json().get("files", []) if detail_resp.status_code == 200 else []
         needs_analysis, rationale = _classify_diff_impact(files)
 
+<<<<<<< HEAD
         # Category 1/2/4/5/6 signals -- detected once per commit, regardless of
         # whether this commit is code-significant enough to trigger a full
         # analysis. Rule-based detection only; the one optional LLM call
@@ -137,6 +144,8 @@ async def check_repo_commits(repo_id: int) -> dict:
         store_signals(db, repo.id, raw_signals, source_commit_sha=sha)
         db.commit()
 
+=======
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
         repo_settings = db.query(RepoSettings).filter(RepoSettings.repository_id == repo.id).first()
         auto_update = repo_settings.auto_update if repo_settings else True
 
@@ -184,11 +193,32 @@ async def check_repo_commits(repo_id: int) -> dict:
         if auto_update and quota_manager.is_available():
             from app.api.analyze import run_analysis
             _analyzing_locks.add(repo.id)
+<<<<<<< HEAD
+=======
+            # Emit analysis_started event to agent engine
+            agent_engine.capture_event(
+                source="analysis",
+                type="analysis_started",
+                title=f"Analysis started for {repo.org}/{repo.name}",
+                detail=f"Triggered by commit {sha[:7]}: {message}",
+                repo_name=f"{repo.org}/{repo.name}",
+            )
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
             try:
                 # Run analysis in background thread with mutex protection
                 def _run():
                     try:
                         run_analysis(repo.id, token)
+<<<<<<< HEAD
+=======
+                        agent_engine.capture_event(
+                            source="analysis",
+                            type="analysis_complete",
+                            title=f"Analysis complete for {repo.org}/{repo.name}",
+                            detail="Documentation suite updated and synced.",
+                            repo_name=f"{repo.org}/{repo.name}",
+                        )
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
                     except Exception as exc:
                         agent_engine.capture_event(
                             source="analysis",

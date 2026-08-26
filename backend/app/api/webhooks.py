@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as DBSession
 from app.core.config import settings
 from app.core.security import decrypt_token
 from app.db.session import get_db
+<<<<<<< HEAD
 from app.models import Repository, GithubAccount, ActivityLog, Document
 from app.services.github import verify_webhook_signature, get_commit_detail
 from app.services.writeback import WRITEBACK_MARKER
@@ -18,6 +19,11 @@ from app.services.signals import (
     caption_signals,
     store_signals,
 )
+=======
+from app.models import Repository, GithubAccount, ActivityLog
+from app.services.github import verify_webhook_signature
+from app.services.writeback import WRITEBACK_MARKER
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
@@ -72,6 +78,7 @@ async def github_webhook(
     ))
     db.commit()
 
+<<<<<<< HEAD
     # Same rule-based signal detection the poller applies to polled commits --
     # this keeps the graph populated for webhook-driven repos too, not just
     # polled ones. No new LLM call except the batched caption (skipped if quota
@@ -95,6 +102,8 @@ async def github_webhook(
     store_signals(db, repo.id, raw_signals, source_commit_sha=commit_sha or None)
     db.commit()
 
+=======
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
     # Reuses the same pipeline as a manual "Analyze" click (Sprints 4-7). A truly
     # diff-aware re-scan that only touches changed files is a stretch goal --
     # for now every push re-runs the full analysis, which is correct, just not

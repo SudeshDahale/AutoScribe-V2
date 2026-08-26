@@ -13,7 +13,10 @@ from app.api.ask import router as ask_router
 from app.api.webhooks import router as webhooks_router
 from app.api.pull_requests import router as pull_requests_router
 from app.api.dashboard import router as dashboard_router
+<<<<<<< HEAD
 from app.api.signals import router as signals_router
+=======
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 from app.services.poller import start_autonomous_poller
 from app.services.agent_engine import agent_engine
 
@@ -51,7 +54,10 @@ app.include_router(ask_router)
 app.include_router(webhooks_router)
 app.include_router(pull_requests_router)
 app.include_router(dashboard_router)
+<<<<<<< HEAD
 app.include_router(signals_router)
+=======
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 
 @app.get("/healthz")

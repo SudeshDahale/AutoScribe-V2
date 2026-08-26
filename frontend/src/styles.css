@@ -178,6 +178,7 @@
   animation: dash-flow 1.2s linear infinite;
 }
 
+<<<<<<< HEAD
 /* ── Signal Graph (dashboard node graph + full-screen panel) ──────────────
    Scoped under signal- prefixed names so nothing here can ever collide with
    an unrelated utility added later. Colors map onto AutoScribe's existing
@@ -234,3 +235,5 @@
 }
 
 
+=======
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e

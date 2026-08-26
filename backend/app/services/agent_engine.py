@@ -316,6 +316,7 @@ class AgentEngine:
             if task:
                 self._enqueue_task(task)
 
+<<<<<<< HEAD
         self._persist_signal(event)
         return event
 
@@ -352,6 +353,10 @@ class AgentEngine:
         except Exception:
             pass
 
+=======
+        return event
+
+>>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
     # ── Task Queue ─────────────────────────────────────────────────────────
 
     def _enqueue_task(self, task: AgentTask):

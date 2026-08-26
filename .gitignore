@@ -1,0 +1,20 @@
+# --- backend (Python) ---
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.env
+
+# --- frontend (Node) ---
+frontend/node_modules/
+frontend/dist/
+frontend/.output/
+frontend/.vite/
+frontend/.wrangler/
+
+# --- editor / OS / backups ---
+.vscode/
+.DS_Store
+Thumbs.db
+AutoScribe-V2/
+backend/server.log

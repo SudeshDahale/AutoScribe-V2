@@ -55,7 +55,7 @@ export function SignalGraphMini({
   const history = execData?.history ?? [];
 
   return (
-    <div className="rounded-2xl border border-border bg-surface-1 p-4 hover:border-primary/20 transition-all duration-200 overflow-hidden">
+    <div className="rounded-2xl border border-border bg-surface-1 p-4 hover:border-primary/20 transition-all duration-200">
       <div className="flex items-center justify-between px-1 mb-2">
         <div>
           <h3 className="text-[15px] font-medium">Signal Graph</h3>

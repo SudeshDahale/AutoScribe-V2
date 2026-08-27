@@ -68,19 +68,17 @@ export function SignalGraphFull({
   docsCount: number;
   openPrs: number;
 }) {
-  const [filter, setFilter] = useState<SignalCategory | null>(null);
   const { data: summary } = useSignalsSummary();
   const { data: execData } = useAgentExecution();
   const { data: taskQueue = [] } = useAgentTaskQueue();
-  const { data: feed = [], isLoading } = useSignalsFeed(filter);
 
   const execution = execData?.execution ?? null;
   const history = execData?.history ?? [];
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-[96vw] w-[1280px] max-h-[92vh] overflow-hidden p-0 gap-0 bg-surface-1 border-border">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
+      <DialogContent className="max-w-[98vw] w-[1400px] max-h-[94vh] overflow-hidden p-0 gap-0 bg-surface-1 border-border">
+        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               Live signal graph
@@ -88,96 +86,22 @@ export function SignalGraphFull({
             <DialogTitle className="mt-1 text-lg font-medium tracking-tight">
               Every signal driving the agent
             </DialogTitle>
-            <DialogDescription className="mt-1 text-xs">
+            <DialogDescription className="mt-0.5 text-xs">
               Signals classified, queued, executed step-by-step, and logged — in real time.
             </DialogDescription>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] max-h-[calc(92vh-88px)]">
-          {/* Graph panel */}
-          <div className="overflow-x-auto p-6 flex items-center justify-center">
-            <SignalCanvas
-              size="full"
-              summary={summary ?? { categories: [], generatedAt: "" }}
-              execution={execution}
-              history={history}
-              taskQueue={taskQueue}
-              docsCount={docsCount}
-              openPrs={openPrs}
-            />
-          </div>
-
-          {/* Signal feed sidebar */}
-          <aside className="border-l border-border flex flex-col min-h-0">
-            {/* Category filters */}
-            <div className="flex flex-wrap gap-1.5 border-b border-border px-4 py-3">
-              <button
-                onClick={() => setFilter(null)}
-                className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
-                  filter === null
-                    ? "border-primary/40 text-foreground bg-surface-2"
-                    : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                All
-              </button>
-              {CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setFilter(cat)}
-                  className={`rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider transition ${
-                    filter === cat
-                      ? "border-primary/40 text-foreground bg-surface-2"
-                      : "border-border text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {CATEGORY_LABELS[cat]}
-                </button>
-              ))}
-            </div>
-
-            {/* Signal feed */}
-            <div className="flex-1 overflow-y-auto px-4 py-4">
-              {isLoading && feed.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">Loading signals…</div>
-              ) : feed.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  No signals yet — they'll appear here as commits land.
-                </div>
-              ) : (
-                <ol className="relative space-y-0 border-l border-border pl-5">
-                  {feed.map((s) => {
-                    const Icon = CATEGORY_ICONS[s.category];
-                    return (
-                      <li key={s.id} className="animate-signal-rise relative pb-4 last:pb-0">
-                        <span className="absolute -left-[25px] top-0 flex">
-                          <SeverityDot severity={s.severity} />
-                        </span>
-                        <div className="signal-node-card rounded-xl px-3.5 py-2.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="text-[12.5px] font-medium leading-snug tracking-tight">{s.title}</p>
-                            <Icon className="size-3.5 shrink-0 text-muted-foreground mt-0.5" />
-                          </div>
-                          {s.detail && (
-                            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{s.detail}</p>
-                          )}
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="rounded-md border border-border bg-surface-3 px-1.5 py-0.5 font-mono text-[9.5px] text-muted-foreground">
-                              {s.repoName ?? "unknown"}
-                            </span>
-                            <span className="font-mono text-[9.5px] text-white/30">
-                              {new Date(s.createdAt).toLocaleTimeString()}
-                            </span>
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </div>
-          </aside>
+        <div className="overflow-x-auto overflow-y-auto p-6 flex items-center justify-center min-h-[640px]">
+          <SignalCanvas
+            size="full"
+            summary={summary ?? { categories: [], generatedAt: "" }}
+            execution={execution}
+            history={history}
+            taskQueue={taskQueue}
+            docsCount={docsCount}
+            openPrs={openPrs}
+          />
         </div>
       </DialogContent>
     </Dialog>

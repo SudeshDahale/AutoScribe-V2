@@ -1,10 +1,6 @@
 from datetime import datetime
 
-<<<<<<< HEAD
 from sqlalchemy import String, Text, DateTime, ForeignKey, JSON, func
-=======
-from sqlalchemy import String, Text, DateTime, ForeignKey, func
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -18,10 +14,7 @@ class Document(Base):
     title: Mapped[str] = mapped_column(String)
     section: Mapped[str] = mapped_column(String)  # e.g. "Getting Started", "Reference"
     slug: Mapped[str] = mapped_column(String)
-<<<<<<< HEAD
     doc_references: Mapped[list | None] = mapped_column(JSON, nullable=True)  # file paths this doc mentions
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 
 class DocumentVersion(Base):

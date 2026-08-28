@@ -21,10 +21,7 @@ from app.models import (
     PullRequest,
     ActivityLog,
     TokenUsage,
-<<<<<<< HEAD
     Signal,
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 )
 from app.services.github import get_repo_tree_sync
 from app.services.analysis import detect_tech_stack, detect_language_mix, bucket_modules
@@ -43,10 +40,7 @@ from app.services.writeback import write_back_docs
 from app.services.llm import UsageTracker
 from app.services.quota import quota_manager
 from app.services.agent_engine import agent_engine
-<<<<<<< HEAD
 from app.services.signals import diff_architecture, extract_doc_references, store_signals
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 
 router = APIRouter(prefix="/api", tags=["analysis"])
@@ -75,7 +69,6 @@ def run_analysis(repo_id: int, token: str):
         db.commit()
         db.refresh(analysis)
 
-<<<<<<< HEAD
         agent_engine.capture_event(
             source="analysis",
             type="analysis_started",
@@ -84,8 +77,6 @@ def run_analysis(repo_id: int, token: str):
             repo_name=f"{repo.org}/{repo.name}",
         )
 
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
         # --- Structural pass (Sprint 4) ---
         tree = get_repo_tree_sync(token, repo.org, repo.name, repo.branch)
         blobs = [item for item in tree if item["type"] == "blob"]
@@ -97,7 +88,6 @@ def run_analysis(repo_id: int, token: str):
 
         top_language = max(language_mix, key=language_mix.get) if language_mix else None
 
-<<<<<<< HEAD
         # Snapshot the previous synced run's architecture graph *before* we touch
         # anything, so we can diff it against this run's result below (category-3
         # Architecture Signals -- no new LLM call, this only diffs output the
@@ -120,8 +110,6 @@ def run_analysis(repo_id: int, token: str):
                 for e in old_edges
             ]
 
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
         # --- LLM pass (Sprint 5) ---
         # Feeds the LLM only what the structural pass actually found — real
         # tech stack, real directories, real file paths — not the whole repo.
@@ -187,15 +175,12 @@ def run_analysis(repo_id: int, token: str):
         analysis.sample_files = sample_files
         analysis.completed_at = datetime.now(timezone.utc)
 
-<<<<<<< HEAD
         if prev_analysis:  # first-ever analysis has nothing to diff against
             new_nodes_data = [{"node_key": n["id"], "label": n["label"]} for n in result["nodes"]]
             new_edges_data = [{"source_key": e["from"], "target_key": e["to"]} for e in result["edges"]]
             arch_signals = diff_architecture(old_nodes_data, new_nodes_data, old_edges_data, new_edges_data)
             store_signals(db, repo.id, arch_signals, analysis_id=analysis.id)
 
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
         # --- Documentation pass (Sprint 6 & 10) ---
         # Generate full doc suite: README, API Reference, Architecture Guide, Developer Runbook
         doc_specs = [
@@ -232,10 +217,7 @@ def run_analysis(repo_id: int, token: str):
                     doc = Document(repository_id=repo.id, title=title, section=section, slug=slug)
                     db.add(doc)
                     db.flush()
-<<<<<<< HEAD
                 doc.doc_references = extract_doc_references(doc_data)
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
                 db.add(DocumentVersion(
                     document_id=doc.id,
@@ -326,7 +308,6 @@ def run_analysis(repo_id: int, token: str):
         repo.docs_count = db.query(Document).filter(Document.repository_id == repo.id).count()
         repo.last_activity_text = f"Understanding score {calculated_score}% · {result.get('rationale', 'Analysis complete')}"[:180]
 
-<<<<<<< HEAD
         agent_engine.capture_event(
             source="analysis",
             type="analysis_complete",
@@ -334,9 +315,6 @@ def run_analysis(repo_id: int, token: str):
             detail=f"Understanding score {calculated_score}%.",
             repo_name=f"{repo.org}/{repo.name}",
         )
-
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
         db.commit()
     except Exception as exc:
         db.rollback()

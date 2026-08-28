@@ -8,9 +8,10 @@ export const CATEGORIES = [
   "dependency",
   "documentation",
   "workflow",
+  "agent",
 ] as const;
 
-export type SignalCategory = (typeof CATEGORIES)[number] | "agent";
+export type SignalCategory = (typeof CATEGORIES)[number];
 
 export type Signal = {
   id: number;
@@ -41,7 +42,7 @@ export type SignalsSummary = {
 };
 
 const EMPTY_SUMMARY: SignalsSummary = {
-  categories: [...CATEGORIES, "agent"].map((category) => ({
+  categories: CATEGORIES.map((category) => ({
     category: category as SignalCategory,
     count1h: 0,
     count24h: 0,

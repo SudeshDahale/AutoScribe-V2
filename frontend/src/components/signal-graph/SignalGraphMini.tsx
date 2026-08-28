@@ -71,7 +71,7 @@ export function SignalGraphMini({
           Full screen
         </button>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-visible">
         <SignalCanvas
           size="mini"
           summary={summary ?? { categories: [], generatedAt: "" }}

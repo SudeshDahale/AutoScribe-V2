@@ -87,7 +87,7 @@ type Dims = {
   cardScale: "mini" | "full";
 };
 
-const NUM_SRC = CATEGORIES.length; // 6 sources
+const NUM_SRC = CATEGORIES.length; // 7 sources
 
 function dimsFor(size: "mini" | "full", expandedNode: ActiveExpandedNode): Dims {
   const isClsExpanded = expandedNode === "classifier";
@@ -128,11 +128,11 @@ function dimsFor(size: "mini" | "full", expandedNode: ActiveExpandedNode): Dims 
   }
 
   // Full screen size dimensions
-  const baseH = 680;
-  const h = isClsExpanded || isExeExpanded ? 760 : baseH;
+  const baseH = 800;
+  const h = isClsExpanded || isExeExpanded ? 900 : baseH;
   const midY = baseH / 2;
-  const srcH = 68;
-  const srcGap = 14;
+  const srcH = 72;
+  const srcGap = 12;
   const totalSrc = NUM_SRC * srcH + (NUM_SRC - 1) * srcGap;
   const srcStartY = (baseH - totalSrc) / 2;
 
@@ -365,7 +365,7 @@ function SourceCard({
 
       {/* Expanded dropdown inline */}
       {isExpanded && (
-        <div className="mt-1.5 rounded-xl border border-white/15 bg-[#121212]/95 p-3 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute left-0 top-full mt-2 w-[260px] max-w-[90vw] rounded-xl border border-white/15 bg-[#121212]/95 p-3 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-150 z-50">
           <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2">
             <span className="font-mono text-[10px] font-medium text-foreground/80">
               {label} Signals

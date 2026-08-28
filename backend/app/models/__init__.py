@@ -11,10 +11,7 @@ from app.models.activity import ActivityLog
 from app.models.session import UserSession
 from app.models.chunk import ChunkEmbedding
 from app.models.token_usage import TokenUsage
-<<<<<<< HEAD
 from app.models.signal import Signal
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 __all__ = [
     "User",
@@ -34,8 +31,5 @@ __all__ = [
     "UserSession",
     "ChunkEmbedding",
     "TokenUsage",
-<<<<<<< HEAD
     "Signal",
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 ]

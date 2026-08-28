@@ -21,7 +21,6 @@ def _humanize(iso_ts: str | None) -> str:
     return "yesterday" if days == 1 else f"{days} days ago"
 
 
-<<<<<<< HEAD
 async def get_commit_detail(token: str, org: str, name: str, sha: str) -> dict:
     """Full commit detail including the 'files' array (filename/status/patch) --
     the same shape poller.py already fetches for the same purpose. Used by the
@@ -38,10 +37,6 @@ async def get_commit_detail(token: str, org: str, name: str, sha: str) -> dict:
         if resp.status_code != 200:
             return {}
         return resp.json()
-
-
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 async def list_user_repos(token: str) -> list[dict]:
     repos: list[dict] = []
     page = 1

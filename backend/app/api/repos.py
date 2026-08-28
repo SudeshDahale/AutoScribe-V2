@@ -104,10 +104,7 @@ def disconnect_repo(repo_id: int, user: User = Depends(get_current_user), db: DB
         ActivityLog, ChunkEmbedding, ChatMessage, ChatConversation,
         DocumentVersion, Document, PullRequest, RepoSettings,
         TokenUsage, Module, ArchitectureEdge, ArchitectureNode, Analysis,
-<<<<<<< HEAD
         Signal,
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
     )
 
     # Chat messages reference conversations, so delete messages first
@@ -135,10 +132,7 @@ def disconnect_repo(repo_id: int, user: User = Depends(get_current_user), db: DB
     db.query(PullRequest).filter(PullRequest.repository_id == repo_id).delete(synchronize_session=False)
     db.query(Module).filter(Module.repository_id == repo_id).delete(synchronize_session=False)
     db.query(TokenUsage).filter(TokenUsage.repository_id == repo_id).delete(synchronize_session=False)
-<<<<<<< HEAD
     db.query(Signal).filter(Signal.repository_id == repo_id).delete(synchronize_session=False)
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
     db.query(RepoSettings).filter(RepoSettings.repository_id == repo_id).delete(synchronize_session=False)
 
     db.delete(repo)

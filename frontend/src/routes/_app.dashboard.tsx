@@ -1,4 +1,4 @@
-﻿import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -26,11 +26,8 @@ import {
   PauseCircle,
   HelpCircle,
 } from "lucide-react";
-<<<<<<< HEAD
 import { SignalGraphMini } from "@/components/signal-graph/SignalGraphMini";
 import { SignalGraphFull } from "@/components/signal-graph/SignalGraphFull";
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({
@@ -217,11 +214,8 @@ function Overview() {
   const completed: CompletedItem[] = data?.completed ?? [];
   const queued: QueuedItem[] = data?.queued ?? [];
 
-  const [dismissedSuggestion, setDismissedSuggestion] = useState(false);
-<<<<<<< HEAD
   const [signalGraphOpen, setSignalGraphOpen] = useState(false);
-=======
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
+  const [dismissedSuggestion, setDismissedSuggestion] = useState(false);
 
   const totals = useMemo(() => {
     const docs = repositories.reduce((s, r) => s + r.docsCount, 0);
@@ -406,7 +400,6 @@ function Overview() {
         />
       </section>
 
-<<<<<<< HEAD
       {/* Signal Graph: replaces the old 3-column task board with a live
           node graph -- 6 source signal categories feeding the Agent, which
           feeds Docs & PRs. Compact by default, expands to full screen. */}
@@ -421,166 +414,6 @@ function Overview() {
         docsCount={totals.docs}
         openPrs={totals.prs}
       />
-=======
-      {/* Task Board: Fixed Heights with Scrollbars so cards never overflow infinitely */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Currently Working Column */}
-        <div className="rounded-2xl border border-border bg-surface-1 p-4 flex flex-col gap-3 hover:border-primary/30 transition-all duration-200">
-          <div className="flex items-center gap-2">
-            <Zap className={`w-4 h-4 text-amber-400 ${totals.analyzing > 0 ? "animate-pulse" : ""}`} />
-            <span className="text-[13.5px] font-semibold text-foreground">Currently Working</span>
-            <span className="ml-auto text-[11px] font-semibold text-foreground bg-surface-2 border border-border rounded-full px-2 py-0.5">
-              {working.length}
-            </span>
-          </div>
-
-          {working.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground gap-2">
-              {engine.isPaused ? (
-                <>
-                  <PauseCircle className="w-6 h-6 text-amber-400/80 animate-pulse" />
-                  <span className="font-medium text-foreground">Quota Cooldown Active</span>
-                  <span className="text-[11px] text-muted-foreground">Auto-resuming in {engine.resetsIn || "a moment"}</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-6 h-6 text-success/70" />
-                  <span className="font-semibold text-foreground">Waiting for new commits on connected repos</span>
-                  <span className="text-[11px] text-muted-foreground">Autonomous commit watcher active</span>
-                  <Link
-                    to="/connect"
-                    className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-primary/30 bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Connect more repository
-                  </Link>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2.5 scrollbar-thin scrollbar-thumb-border">
-              {working.map((item, i) => (
-                <Link
-                  key={item.repoId + i}
-                  to="/repository/$id"
-                  params={{ id: item.repoId }}
-                  className="block p-3 rounded-xl bg-amber-500/[0.07] border border-amber-500/25 hover:border-amber-500/50 transition space-y-1.5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[13px] font-semibold text-foreground">{item.org}/{item.repoName}</span>
-                    <span className="flex items-center gap-1 text-[10.5px] text-amber-400 font-medium uppercase tracking-wider">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" /> Live
-                    </span>
-                  </div>
-                  <p className="text-[11.5px] text-muted-foreground leading-snug">{item.stage}</p>
-                  <div className="flex items-center gap-2 pt-1 border-t border-amber-500/15 text-[10.5px] text-muted-foreground">
-                    <Clock className="w-3 h-3 text-amber-400" />
-                    <span>{item.elapsedSecs > 0 ? `${item.elapsedSecs}s elapsed` : "Starting..."}</span>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Completed Column */}
-        <div className="rounded-2xl border border-border bg-surface-1 p-4 flex flex-col gap-3 hover:border-primary/30 transition-all duration-200">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-success" />
-            <span className="text-[13.5px] font-semibold text-foreground">Completed Milestones</span>
-            <span className="ml-auto text-[11px] font-semibold text-foreground bg-surface-2 border border-border rounded-full px-2 py-0.5">
-              {completed.length}
-            </span>
-          </div>
-
-          {completed.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground gap-1.5">
-              <Circle className="w-5 h-5 text-muted-foreground/40" />
-              <span>No completed milestones yet</span>
-              <span className="text-[10.5px] text-muted-foreground/70">Connect a repo to run initial scan</span>
-            </div>
-          ) : (
-            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-border">
-              {completed.map((item, i) => {
-                const isAnalysis = item.type === "analysis";
-                const isPR = item.type === "pr";
-                return (
-                  <Link
-                    key={(item.repoId ?? "global") + i}
-                    to={item.repoId ? "/repository/$id" : "/documents-log"}
-                    params={item.repoId ? { id: item.repoId } : undefined as any}
-                    className="block p-2.5 rounded-xl bg-surface-2/60 border border-border/80 hover:border-border transition group"
-                  >
-                    <div className="flex items-start gap-2">
-                      {isAnalysis ? (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
-                      ) : isPR ? (
-                        <GitPullRequest className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
-                      ) : (
-                        <Activity className="w-3.5 h-3.5 text-success shrink-0 mt-0.5" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[12.5px] text-foreground font-medium truncate">{item.label}</div>
-                        <div className="text-[10.5px] text-muted-foreground mt-0.5 flex items-center justify-between">
-                          <span>{item.org}/{item.repoName}</span>
-                          <span>{item.time}</span>
-                        </div>
-                        {isAnalysis && item.docsGenerated != null && (
-                          <div className="text-[10px] text-success/70 mt-0.5">{item.docsGenerated} docs ┬╖ {item.filesAnalyzed} files</div>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Queued Column */}
-        <div className="rounded-2xl border border-border bg-surface-1 p-4 flex flex-col gap-3 hover:border-primary/30 transition-all duration-200">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-primary" />
-            <span className="text-[13.5px] font-semibold text-foreground">Queued &amp; Pending</span>
-            <span className="ml-auto text-[11px] font-semibold text-foreground bg-surface-2 border border-border rounded-full px-2 py-0.5">
-              {queued.length}
-            </span>
-          </div>
-
-          {queued.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground gap-1.5">
-              <CheckCircle2 className="w-5 h-5 text-primary/70" />
-              <span className="font-semibold text-foreground">No tasks queued</span>
-              <span className="text-[10.5px] text-muted-foreground">Waiting for new commits on connected repos</span>
-            </div>
-          ) : (
-            <div className="max-h-[380px] overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-border">
-              {queued.map((item, i) => (
-                <div key={(item.repoId ?? "global") + i} className="p-2.5 rounded-xl bg-surface-2/60 border border-border/80 flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12.5px] font-medium text-foreground truncate">
-                      {item.org ? `${item.org}/` : ""}{item.repoName}
-                    </div>
-                    <div className="text-[10.5px] text-muted-foreground">{item.label}</div>
-                    {item.resumesIn && (
-                      <div className="text-[10px] text-amber-400 mt-0.5">Auto-resumes in {item.resumesIn}</div>
-                    )}
-                  </div>
-                  {item.repoId && (
-                    <Link
-                      to="/repository/$id"
-                      params={{ id: item.repoId }}
-                      className="text-xs text-primary font-medium hover:underline shrink-0"
-                    >
-                      View
-                    </Link>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
->>>>>>> 71b13c417fd9639cd3e7197ada4f44e95fcbff7e
 
       {/* Live Activity Feed */}
       <section className="rounded-2xl border border-border bg-surface-1 p-5 hover:border-primary/20 transition-all duration-200">

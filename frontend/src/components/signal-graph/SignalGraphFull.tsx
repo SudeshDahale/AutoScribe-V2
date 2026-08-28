@@ -77,8 +77,9 @@ export function SignalGraphFull({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-[98vw] w-[1400px] max-h-[94vh] overflow-hidden p-0 gap-0 bg-surface-1 border-border">
-        <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+      <DialogContent className="max-w-[98vw] w-[1400px] max-h-[94vh] flex flex-col p-0 gap-0 bg-surface-1 border-border overflow-hidden">
+        {/* Sticky header */}
+        <div className="flex-shrink-0 flex items-start justify-between gap-4 border-b border-border px-6 py-4">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               Live signal graph
@@ -92,16 +93,19 @@ export function SignalGraphFull({
           </div>
         </div>
 
-        <div className="overflow-x-auto overflow-y-auto p-6 flex items-center justify-center min-h-[640px]">
-          <SignalCanvas
-            size="full"
-            summary={summary ?? { categories: [], generatedAt: "" }}
-            execution={execution}
-            history={history}
-            taskQueue={taskQueue}
-            docsCount={docsCount}
-            openPrs={openPrs}
-          />
+        {/* Scrollable canvas area */}
+        <div className="flex-1 overflow-auto p-6">
+          <div className="flex items-start justify-center min-w-max">
+            <SignalCanvas
+              size="full"
+              summary={summary ?? { categories: [], generatedAt: "" }}
+              execution={execution}
+              history={history}
+              taskQueue={taskQueue}
+              docsCount={docsCount}
+              openPrs={openPrs}
+            />
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -232,3 +232,31 @@
 @utility animate-signal-panel-in {
   animation: signal-panel-in 0.22s ease both;
 }
+
+/* ── Ask AI / Chat utilities ───────────────────────────────────────────────── */
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(255,255,255,0.08);
+  border-radius: 4px;
+}
+
+.prose-ai {
+  line-height: 1.75;
+}
+.prose-ai strong {
+  color: rgba(255,255,255,0.95);
+  font-weight: 600;
+}
+.prose-ai code {
+  font-family: var(--font-mono);
+}

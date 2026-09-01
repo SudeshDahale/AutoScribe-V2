@@ -1,33 +1,24 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRepos } from "@/lib/repo-store";
 import { z } from "zod";
 import {
-  Send,
-  FileCode,
-  ArrowRight,
-  ArrowUpRight,
-  Loader2,
-  ChevronDown,
   Plus,
-  MessageSquare,
-  Bot,
-  User as UserIcon,
+  FileCode,
+  ChevronDown,
   Copy,
   Check,
   Sparkles,
-  RefreshCw,
-  Code2,
-  Layers,
-  Terminal,
-  GitBranch,
+  SquarePen,
+  ChevronRight,
+  Loader2,
+  ArrowUp,
 } from "lucide-react";
 
 const searchSchema = z.object({
   repo: z.string().optional(),
   conversationId: z.string().optional(),
-  new: z.string().optional(),
 });
 
 export const Route = createFileRoute("/_app/ask")({
@@ -35,604 +26,522 @@ export const Route = createFileRoute("/_app/ask")({
   head: () => ({
     meta: [
       { title: "Ask AI · AutoScribe" },
-      { name: "description", content: "Ask any question about your codebase and get answers grounded in real files, modules and architecture." },
-      { property: "og:title", content: "Ask AI · AutoScribe" },
-      { property: "og:description", content: "Conversational answers grounded in your repository." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
+      { name: "description", content: "Chat with your codebase" },
     ],
   }),
-  component: Ask,
+  component: AskPage,
 });
 
-type FlowStep = { label: string; meta: string };
-type SourceFile = { name: string; path: string };
 type Message = {
   role: "user" | "assistant";
   text: string;
-  flow: FlowStep[];
-  files: SourceFile[];
+  flow: { label: string; meta: string }[];
+  files: { name: string; path: string }[];
   followups: string[];
 };
-type Conversation = {
-  id: number;
-  title: string;
-  created_at: string;
-};
+type Conversation = { id: number; title: string; created_at: string };
 
-const fallbackSuggestedQuestions = [
-  "Where is authentication implemented?",
+const SUGGESTED = [
   "What does this repository do?",
+  "Where is authentication handled?",
   "What's the overall architecture?",
-  "How are database models configured?",
-  "List main API endpoints",
+  "How are database models structured?",
+  "List the main API endpoints",
+  "How do I run this project locally?",
 ];
 
-function CodeBlock({ code, language }: { code: string; language: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+function groupByDate(convs: Conversation[]) {
+  const now = new Date();
+  const buckets: Record<string, Conversation[]> = {
+    Today: [], Yesterday: [], "Previous 7 days": [], Older: [],
   };
-  return (
-    <div className="my-4 rounded-xl border border-border bg-surface-2 overflow-hidden shadow-xs font-mono text-[13px]">
-      <div className="flex items-center justify-between px-4 py-2 bg-surface-3/80 border-b border-border text-muted-foreground text-[11px]">
-        <span className="flex items-center gap-1.5 text-foreground/80 font-medium">
-          <Terminal className="w-3.5 h-3.5 text-primary" /> {language || "code"}
-        </span>
-        <button onClick={handleCopy} className="inline-flex items-center gap-1 hover:text-foreground transition text-[11px] px-2 py-1 rounded-md hover:bg-surface-2">
-          {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
-      </div>
-      <pre className="p-5 overflow-x-auto text-foreground/90 leading-relaxed whitespace-pre font-mono">{code}</pre>
-    </div>
-  );
+  convs.forEach((c) => {
+    const diff = Math.floor((now.getTime() - new Date(c.created_at).getTime()) / 86400000);
+    if (diff < 1) buckets["Today"].push(c);
+    else if (diff < 2) buckets["Yesterday"].push(c);
+    else if (diff < 7) buckets["Previous 7 days"].push(c);
+    else buckets["Older"].push(c);
+  });
+  return Object.entries(buckets).filter(([, items]) => items.length > 0);
 }
 
-function FormattedMessageText({ text }: { text: string }) {
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
-  const parts: { type: string; content: string; language?: string }[] = [];
-  let lastIndex = 0;
-  let match;
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) parts.push({ type: "text", content: text.slice(lastIndex, match.index) });
-    parts.push({ type: "code", language: match[1] || "typescript", content: match[2].trim() });
-    lastIndex = match.index + match[0].length;
+// ── Markdown renderer ─────────────────────────────────────────────────────────
+
+function Markdown({ text }: { text: string }) {
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const copy = (code: string, i: number) => {
+    navigator.clipboard.writeText(code);
+    setCopiedIdx(i);
+    setTimeout(() => setCopiedIdx(null), 2000);
+  };
+
+  const codeRx = /```(\w*)\n?([\s\S]*?)```/g;
+  const parts: { type: "text" | "code"; content: string; lang?: string }[] = [];
+  let last = 0; let m: RegExpExecArray | null; let ci = 0;
+  while ((m = codeRx.exec(text)) !== null) {
+    if (m.index > last) parts.push({ type: "text", content: text.slice(last, m.index) });
+    parts.push({ type: "code", lang: m[1] || "text", content: m[2].trimEnd() });
+    last = m.index + m[0].length;
   }
-  if (lastIndex < text.length) parts.push({ type: "text", content: text.slice(lastIndex) });
+  if (last < text.length) parts.push({ type: "text", content: text.slice(last) });
+
+  const formatInline = (str: string) => {
+    return str
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" class="text-blue-400 hover:underline inline-flex items-center gap-0.5">$1</a>')
+      .replace(/\*\*(.+?)\*\*/g, "<strong class=\"font-semibold text-white\">$1</strong>")
+      .replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 rounded bg-white/10 text-[13px] font-mono text-white/90">$1</code>');
+  };
+
   return (
-    <div className="space-y-3 text-[15px] leading-[1.75] text-foreground/90 font-sans">
-      {parts.map((p, i) =>
-        p.type === "code" ? (
-          <CodeBlock key={i} code={p.content} language={p.language || "typescript"} />
-        ) : (
-          <div key={i} className="whitespace-pre-wrap">
-            {p.content.split("\n\n").map((para, j) => (
-              <p key={j} className={j > 0 ? "mt-4" : ""}>{para}</p>
-            ))}
+    <div className="prose-ai space-y-4">
+      {parts.map((p, i) => {
+        if (p.type === "code") {
+          const idx = ci++;
+          return (
+            <div key={i} className="my-4 rounded-xl overflow-hidden border border-white/10 bg-[#1a1a1a] font-mono">
+              <div className="flex items-center justify-between px-4 py-2 bg-[#222] border-b border-white/10">
+                <span className="text-[11px] text-white/40 font-medium">{p.lang || "code"}</span>
+                <button onClick={() => copy(p.content, idx)} className="flex items-center gap-1.5 text-[11px] text-white/40 hover:text-white/80 transition">
+                  {copiedIdx === idx ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                  {copiedIdx === idx ? "Copied!" : "Copy code"}
+                </button>
+              </div>
+              <pre className="p-4 overflow-x-auto text-[13px] leading-relaxed text-white/85 whitespace-pre">{p.content}</pre>
+            </div>
+          );
+        }
+
+        return (
+          <div key={i} className="space-y-3">
+            {p.content.split(/\n\n+/).map((para, j) => {
+              const trimmed = para.trim();
+
+              // Table parsing
+              if (trimmed.includes("|") && trimmed.split("\n").length >= 2) {
+                const lines = trimmed.split("\n").filter(l => l.trim().startsWith("|"));
+                if (lines.length >= 2) {
+                  const headerCells = lines[0].split("|").slice(1, -1).map(c => c.trim());
+                  // Skip separator line (line 1 with ---)
+                  const bodyRows = lines.slice(2).map(r => r.split("|").slice(1, -1).map(c => c.trim()));
+                  return (
+                    <div key={j} className="my-4 overflow-x-auto rounded-xl border border-white/10 bg-white/[0.02]">
+                      <table className="w-full text-left text-[13px] border-collapse">
+                        <thead>
+                          <tr className="border-b border-white/10 bg-white/[0.04]">
+                            {headerCells.map((h, k) => (
+                              <th key={k} className="px-3.5 py-2.5 font-semibold text-white/90" dangerouslySetInnerHTML={{ __html: formatInline(h) }} />
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/[0.06]">
+                          {bodyRows.map((row, k) => (
+                            <tr key={k} className="hover:bg-white/[0.02] transition">
+                              {row.map((cell, l) => (
+                                <td key={l} className="px-3.5 py-2.5 text-white/80" dangerouslySetInnerHTML={{ __html: formatInline(cell) }} />
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                }
+              }
+
+              // Bullet list
+              if (/^[\s]*[-*•]\s/m.test(para)) {
+                return (
+                  <ul key={j} className="space-y-1.5 pl-1 my-2">
+                    {para.split("\n").filter(Boolean).map((l, k) => (
+                      <li key={k} className="flex items-start gap-2.5 text-[15px] leading-relaxed text-white/85">
+                        <span className="mt-[9px] w-1.5 h-1.5 rounded-full bg-white/40 shrink-0" />
+                        <span dangerouslySetInnerHTML={{ __html: formatInline(l.replace(/^[\s]*[-*•]\s/, "")) }} />
+                      </li>
+                    ))}
+                  </ul>
+                );
+              }
+
+              // Numbered list
+              if (/^\d+\.\s/m.test(para)) {
+                return (
+                  <ol key={j} className="space-y-1.5 pl-1 list-none my-2">
+                    {para.split("\n").filter(l => /^\d+\.\s/.test(l)).map((l, k) => {
+                      const match = l.match(/^(\d+)\.\s(.+)/);
+                      return (
+                        <li key={k} className="flex items-start gap-2.5 text-[15px] leading-relaxed text-white/85">
+                          <span className="shrink-0 text-white/40 font-mono text-[13px] mt-0.5">{match?.[1]}.</span>
+                          <span dangerouslySetInnerHTML={{ __html: formatInline(match?.[2] || "") }} />
+                        </li>
+                      );
+                    })}
+                  </ol>
+                );
+              }
+
+              // Headings
+              if (/^#{1,3}\s/.test(para)) {
+                const level = para.match(/^(#{1,3})\s/)?.[1].length || 1;
+                const titleText = para.replace(/^#{1,3}\s/, "");
+                const sizeClass = level === 1 ? "text-[18px] font-bold text-white mt-4 mb-1" : level === 2 ? "text-[16px] font-semibold text-white mt-3 mb-1" : "text-[14.5px] font-semibold text-white/95 mt-2 mb-1";
+                return <h3 key={j} className={sizeClass} dangerouslySetInnerHTML={{ __html: formatInline(titleText) }} />;
+              }
+
+              // Plain paragraph
+              return <p key={j} className="text-[15px] leading-[1.75] text-white/85" dangerouslySetInnerHTML={{ __html: formatInline(para) }} />;
+            })}
           </div>
-        )
-      )}
+        );
+      })}
     </div>
   );
 }
 
-function Ask() {
+// ── Smart auto-scroll ─────────────────────────────────────────────────────────
+
+function useSmartScroll(deps: unknown[]) {
+  const ref = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const h = () => { pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; };
+    el.addEventListener("scroll", h, { passive: true });
+    return () => el.removeEventListener("scroll", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (pinned.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, deps);
+  return ref;
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+function AskPage() {
   const { repos } = useRepos();
   const navigate = useNavigate();
   const search = Route.useSearch();
-  const queryClient = useQueryClient();
+  const qc = useQueryClient();
 
   const repoId = search.repo ?? repos[0]?.id ?? "";
-  const conversationId = search.conversationId ? Number(search.conversationId) : null;
+  // If conversationId is in the URL, we're viewing an existing chat.
+  // If it's absent, this is a NEW chat — show empty state regardless of past convs.
+  const urlConvId = search.conversationId ? Number(search.conversationId) : null;
 
   const [input, setInput] = useState("");
-  const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingMessage, setStreamingMessage] = useState<Message | null>(null);
-  const [copiedMsgIdx, setCopiedMsgIdx] = useState<number | null>(null);
-  const [activeConvId, setActiveConvId] = useState<number | null>(conversationId);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeConvId, setActiveConvId] = useState<number | null>(urlConvId);
+  const [pendingMsg, setPendingMsg] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [streamText, setStreamText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Sync active conversation with URL
+  useEffect(() => { setActiveConvId(urlConvId); }, [urlConvId]);
 
+  // Default repo redirect
   useEffect(() => {
-    if (!search.repo && repos[0]?.id) {
-      navigate({ to: "/ask", search: { repo: repos[0].id }, replace: true });
-    }
+    if (!search.repo && repos[0]?.id) navigate({ to: "/ask", search: { repo: repos[0].id }, replace: true });
   }, [repos, search.repo, navigate]);
 
-  useEffect(() => {
-    setActiveConvId(conversationId);
-  }, [conversationId]);
+  const activeRepo = repos.find(r => r.id === repoId);
 
-  const activeRepo = repos.find((r) => r.id === repoId);
-
-  const conversationsQuery = useQuery({
+  // Fetch conversation list for sidebar
+  const convListQ = useQuery({
     queryKey: ["conversations", repoId],
-    queryFn: async () => {
+    queryFn: async (): Promise<Conversation[]> => {
       const res = await fetch(`/api/repos/${repoId}/conversations`);
-      if (!res.ok) return [] as Conversation[];
-      return res.json() as Promise<Conversation[]>;
+      return res.ok ? res.json() : [];
     },
     enabled: !!repoId,
   });
 
-  const conversationQuery = useQuery({
-    queryKey: ["conversation", repoId, activeConvId],
-    queryFn: async () => {
-      const url = activeConvId
-        ? `/api/repos/${repoId}/conversation?conversation_id=${activeConvId}`
-        : `/api/repos/${repoId}/conversation`;
-      const res = await fetch(url);
-      if (!res.ok) return { messages: [] as Message[], conversationId: null };
-      return res.json() as Promise<{ messages: Message[]; conversationId: number | null }>;
+  // KEY FIX: Only fetch messages when we have an explicit conversationId in the URL.
+  // Without a conversationId = new chat = empty state. Never auto-load the latest conv.
+  const convMsgsQ = useQuery({
+    queryKey: ["conv-messages", repoId, activeConvId],
+    queryFn: async (): Promise<{ messages: Message[]; conversationId: number | null }> => {
+      const res = await fetch(`/api/repos/${repoId}/conversation?conversation_id=${activeConvId}`);
+      return res.ok ? res.json() : { messages: [], conversationId: null };
     },
-    enabled: !!repoId,
+    enabled: !!repoId && activeConvId !== null, // ← Only fetch when viewing a specific conversation
   });
 
-  const suggestedQuery = useQuery({
-    queryKey: ["suggested-questions", repoId],
-    queryFn: async () => {
+  const suggestedQ = useQuery({
+    queryKey: ["suggested", repoId],
+    queryFn: async (): Promise<{ questions: string[] }> => {
       const res = await fetch(`/api/repos/${repoId}/suggested-questions`);
-      if (!res.ok) return { questions: fallbackSuggestedQuestions };
-      return res.json() as Promise<{ questions: string[] }>;
+      return res.ok ? res.json() : { questions: SUGGESTED };
     },
     enabled: !!repoId,
   });
 
-  const messages = conversationQuery.data?.messages ?? [];
-  const suggested = suggestedQuery.data?.questions ?? fallbackSuggestedQuestions;
-  const conversations = conversationsQuery.data ?? [];
+  const messages = convMsgsQ.data?.messages ?? [];
+  const conversations = convListQ.data ?? [];
+  const suggested = suggestedQ.data?.questions?.length ? suggestedQ.data.questions : SUGGESTED;
+  // hasChat: true only if we have a real conversation selected AND it has messages (or we're mid-stream)
+  const hasChat = (activeConvId !== null && messages.length > 0) || !!pendingMsg;
+  const chatRef = useSmartScroll([streamText, pendingMsg, messages.length]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, pendingQuestion]);
-
-  async function handleAsk(question: string) {
-    const trimmed = question.trim();
-    if (!trimmed || isStreaming || !repoId) return;
-    setIsStreaming(true);
-    setPendingQuestion(trimmed);
-    setInput("");
-    setStreamingMessage({ role: "assistant", text: "", flow: [], files: [], followups: [] });
-
-    let finalConvId = activeConvId;
-
+  const ask = useCallback(async (question: string) => {
+    const q = question.trim();
+    if (!q || streaming || !repoId) return;
+    setStreaming(true); setStreamText(""); setPendingMsg(q); setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    let finalId = activeConvId;
     try {
-      const convParam = activeConvId ? `?conversation_id=${activeConvId}` : "";
-      const res = await fetch(`/api/repos/${repoId}/ask/stream${convParam}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: trimmed }),
+      const qs = activeConvId ? `?conversation_id=${activeConvId}` : "";
+      const res = await fetch(`/api/repos/${repoId}/ask/stream${qs}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q }),
       });
-      if (!res.ok) throw new Error("Failed to connect to AI assistant server");
-
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder("utf-8");
-      if (!reader) throw new Error("Stream response body unavailable");
-
-      let done = false;
-      let accText = "";
-      let buffer = "";
-
-      while (!done) {
-        const { value, done: readerDone } = await reader.read();
-        done = readerDone;
-        if (value) {
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() || "";
-          for (const line of parts) {
-            if (line.startsWith("data: ")) {
-              const dataStr = line.slice(6);
-              try {
-                const data = JSON.parse(dataStr);
-                if (data.error) {
-                  accText += `\n\n*(Error: ${data.error})*`;
-                  setStreamingMessage((prev) => (prev ? { ...prev, text: accText } : null));
-                } else if (data.token) {
-                  accText += data.token;
-                  setStreamingMessage((prev) => (prev ? { ...prev, text: accText } : null));
-                } else if (data.done) {
-                  if (data.conversationId) {
-                    finalConvId = data.conversationId;
-                  }
-                  setStreamingMessage((prev) =>
-                    prev ? { ...prev, flow: data.flow, files: data.files, followups: data.followups } : null
-                  );
-                }
-              } catch (e) {
-                console.error("Failed to parse SSE event", e, dataStr);
-              }
-            }
-          }
+      if (!res.ok || !res.body) throw new Error("Stream failed");
+      const reader = res.body.getReader(); const dec = new TextDecoder();
+      let buf = ""; let acc = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n"); buf = parts.pop() ?? "";
+        for (const part of parts) {
+          if (!part.startsWith("data: ")) continue;
+          try {
+            const d = JSON.parse(part.slice(6));
+            if (d.token) { acc += d.token; setStreamText(acc); }
+            else if (d.done && d.conversationId) finalId = d.conversationId;
+            else if (d.error) { acc += `\n\n*Error: ${d.error}*`; setStreamText(acc); }
+          } catch { /* skip */ }
         }
       }
-
-      if (finalConvId) {
-        setActiveConvId(finalConvId);
-        queryClient.invalidateQueries({ queryKey: ["conversation", repoId, finalConvId] });
-        queryClient.invalidateQueries({ queryKey: ["conversations", repoId] });
-        navigate({
-          to: "/ask",
-          search: { repo: repoId, conversationId: String(finalConvId) },
-          replace: true,
-        });
-      }
-    } catch (e: any) {
-      console.error(e);
-      setStreamingMessage({
-        role: "assistant",
-        text: `Sorry, an error occurred: ${e?.message || "Unknown error"}. Please check your connection or LLM status in Settings.`,
-        flow: [],
-        files: [],
-        followups: [],
-      });
+    } catch (e) {
+      setStreamText(`Sorry, something went wrong: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
-      setIsStreaming(false);
-      setPendingQuestion(null);
-      setStreamingMessage(null);
+      if (finalId) {
+        setActiveConvId(finalId);
+        qc.invalidateQueries({ queryKey: ["conv-messages", repoId, finalId] });
+        qc.invalidateQueries({ queryKey: ["conversations", repoId] });
+        navigate({ to: "/ask", search: { repo: repoId, conversationId: String(finalId) }, replace: true });
+      }
+      setStreaming(false); setPendingMsg(null); setStreamText("");
     }
-  }
+  }, [streaming, repoId, activeConvId, qc, navigate]);
 
-  function handleRepoChange(nextId: string) {
+  const newChat = () => {
     setActiveConvId(null);
-    navigate({ to: "/ask", search: { repo: nextId }, replace: true });
-  }
-
-  function handleSelectConversation(conv: Conversation) {
-    setActiveConvId(conv.id);
-    navigate({ to: "/ask", search: { repo: repoId, conversationId: String(conv.id) } });
-  }
-
-  function handleNewConversation() {
-    setActiveConvId(null);
-    setStreamingMessage(null);
-    setPendingQuestion(null);
+    setPendingMsg(null);
+    setStreamText("");
     setInput("");
+    // Navigate WITHOUT conversationId — this is the key to showing empty state
     navigate({ to: "/ask", search: { repo: repoId }, replace: true });
-  }
+  };
 
-  function copyMessage(text: string, idx: number) {
-    navigator.clipboard.writeText(text);
-    setCopiedMsgIdx(idx);
-    setTimeout(() => setCopiedMsgIdx(null), 2000);
-  }
+  const groups = groupByDate(conversations);
 
-  const hasMessages = messages.length > 0 || !!pendingQuestion;
+  // Height = viewport minus topbar (h-14 = 56px). This is the most reliable way
+  // to make a fixed-height container inside the global shell without restructuring the layout.
+  const CONTENT_HEIGHT = "calc(100vh - 56px)";
 
   return (
-    <div className="flex h-[calc(100vh-6.5rem)] rounded-2xl border border-border bg-background overflow-hidden shadow-sm">
-      {/* ─── Sidebar ──────────────────────────────────────────────────────── */}
-      <div
-        className={`${sidebarOpen ? "w-64" : "w-0"} shrink-0 border-r border-border bg-surface-1 flex flex-col h-full transition-all duration-300 overflow-hidden`}
-      >
-        {/* Sidebar header */}
-        <div className="p-4 border-b border-border space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-primary/15 flex items-center justify-center">
-                <Sparkles className="w-3.5 h-3.5 text-primary" />
-              </div>
-              <span className="text-[13px] font-semibold text-foreground">Ask AI</span>
+    <div
+      id="ask-ai-container"
+      className="flex w-full overflow-hidden bg-[#212121]"
+      style={{ height: CONTENT_HEIGHT }}
+    >
+      {/* ── Conversation sidebar ─────────────────────────────────────────── */}
+      <aside className="w-56 shrink-0 flex flex-col bg-[#171717] border-r border-white/[0.06]" style={{ height: CONTENT_HEIGHT }}>
+        {/* Header */}
+        <div className="px-3 pt-3 pb-2 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2 pl-1">
+            <div className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
+              <Sparkles className="w-3 h-3 text-black" />
             </div>
-            <span className="px-1.5 py-0.5 text-[10px] rounded-full bg-primary/10 border border-primary/20 text-primary font-medium">
-              RAG
-            </span>
+            <span className="text-[13px] font-semibold text-white/80">Ask AI</span>
           </div>
-
-          {/* Repo selector */}
-          {repos.length > 0 && (
-            <div className="flex items-center gap-2 h-9 px-3 rounded-xl border border-border bg-surface-2 text-xs cursor-pointer hover:border-primary/30 transition">
-              <GitBranch className="w-3.5 h-3.5 text-primary shrink-0" />
-              <div className="relative flex-1 flex items-center min-w-0">
-                <select
-                  value={repoId}
-                  onChange={(e) => handleRepoChange(e.target.value)}
-                  className="w-full appearance-none bg-transparent text-foreground font-medium text-xs pr-4 focus:outline-none cursor-pointer truncate"
-                >
-                  {repos.map((r) => (
-                    <option key={r.id} value={r.id} className="bg-background">
-                      {r.org}/{r.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground absolute right-0 pointer-events-none" />
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={handleNewConversation}
-            className="w-full inline-flex items-center justify-center gap-2 h-9 rounded-xl border border-border bg-surface-2 hover:bg-surface-3 hover:border-primary/30 text-foreground text-xs font-medium transition"
-          >
-            <Plus className="w-3.5 h-3.5 text-primary" />
-            New chat
+          <button onClick={newChat} title="New chat"
+            className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition">
+            <SquarePen className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* Conversation list */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-0.5">
-          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-            Conversations
+        {/* Repo picker - only if multiple repos */}
+        {repos.length > 1 && (
+          <div className="px-3 pb-2 shrink-0">
+            <div className="relative">
+              <select value={repoId}
+                onChange={e => { setActiveConvId(null); navigate({ to: "/ask", search: { repo: e.target.value }, replace: true }); }}
+                className="w-full appearance-none bg-white/[0.05] border border-white/10 rounded-lg px-3 py-1.5 text-[11px] text-white/60 focus:outline-none cursor-pointer pr-6">
+                {repos.map(r => <option key={r.id} value={r.id} className="bg-[#1a1a1a]">{r.org}/{r.name}</option>)}
+              </select>
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30 pointer-events-none" />
+            </div>
           </div>
-          {conversations.length === 0 ? (
-            <div className="p-3 text-xs text-muted-foreground text-center">No conversations yet.</div>
-          ) : (
-            conversations.map((conv) => (
-              <button
-                key={conv.id}
-                onClick={() => handleSelectConversation(conv)}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left text-xs transition truncate ${
-                  activeConvId === conv.id
-                    ? "bg-primary/10 text-primary border border-primary/20"
-                    : "text-muted-foreground hover:text-foreground hover:bg-surface-2"
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5 shrink-0 opacity-70" />
-                <span className="truncate">{conv.title}</span>
-              </button>
+        )}
+
+        {/* New chat button */}
+        <div className="px-2 pb-2 shrink-0">
+          <button onClick={newChat}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] text-white/50 hover:text-white hover:bg-white/[0.07] transition">
+            <Plus className="w-3.5 h-3.5" /> New chat
+          </button>
+        </div>
+
+        {/* Scrollable conversation list */}
+        <div className="flex-1 overflow-y-auto px-2 pb-4 scrollbar-thin">
+          {groups.length === 0
+            ? <p className="px-3 py-4 text-[11px] text-white/25 text-center">No conversations yet</p>
+            : groups.map(([label, items]) => (
+              <div key={label} className="mb-4">
+                <p className="px-3 pb-1 text-[10px] font-medium text-white/25 uppercase tracking-wider">{label}</p>
+                {items.map(c => (
+                  <button key={c.id}
+                    onClick={() => { setActiveConvId(c.id); navigate({ to: "/ask", search: { repo: repoId, conversationId: String(c.id) } }); }}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-[12px] truncate transition mb-0.5 ${activeConvId === c.id ? "bg-white/10 text-white" : "text-white/55 hover:text-white hover:bg-white/[0.06]"}`}>
+                    {c.title || "New conversation"}
+                  </button>
+                ))}
+              </div>
             ))
-          )}
+          }
         </div>
+      </aside>
 
-        <div className="p-3 border-t border-border text-[11px] text-muted-foreground text-center">
-          Answers grounded in your codebase
-        </div>
-      </div>
+      {/* ── Main chat ───────────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0 relative overflow-hidden" style={{ height: CONTENT_HEIGHT }}>
 
-      {/* ─── Main Chat Area ───────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col h-full min-w-0 relative">
-
-        {/* Top bar */}
-        <div className="h-12 px-4 border-b border-border bg-background flex items-center justify-between shrink-0">
-          <button
-            onClick={() => setSidebarOpen((v) => !v)}
-            className="p-1.5 rounded-lg hover:bg-surface-2 text-muted-foreground hover:text-foreground transition"
-            title="Toggle sidebar"
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-md bg-primary/15 flex items-center justify-center">
-              <Bot className="w-3 h-3 text-primary" />
-            </div>
-            <span className="text-sm font-semibold text-foreground">
-              {activeRepo ? `${activeRepo.org}/${activeRepo.name}` : "AutoScribe AI"}
-            </span>
-          </div>
-          <button
-            onClick={handleNewConversation}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition px-2 py-1 rounded-lg hover:bg-surface-2"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">New chat</span>
-          </button>
-        </div>
-
-        {/* Messages viewport — fills all available space */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {!hasMessages ? (
+        {/* Scrollable messages area */}
+        <div ref={chatRef} className="flex-1 overflow-y-auto flex flex-col">
+          {!hasChat ? (
             /* ── Welcome / empty state ─────────────────────────────────── */
-            <div className="h-full flex flex-col items-center justify-center text-center px-6 py-12">
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-sm mb-6">
-                <Sparkles className="w-8 h-8" />
+            <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
+              <div className="mb-6 relative flex items-center justify-center">
+                <div className="absolute w-16 h-16 rounded-full bg-white/[0.07] animate-ping" style={{ animationDuration: "3s" }} />
+                <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-lg relative z-10">
+                  <Sparkles className="w-5 h-5 text-black" />
+                </div>
               </div>
-              <h2 className="text-xl font-semibold text-foreground mb-2">
-                {activeRepo ? `Ask anything about ${activeRepo.name}` : "What would you like to know?"}
-              </h2>
-              <p className="text-sm text-muted-foreground max-w-md mb-8">
-                AutoScribe AI answers using real files, modules, and architecture from your connected repository.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-xl">
-                {suggested.map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => handleAsk(q)}
-                    className="group p-4 text-left rounded-xl border border-border bg-surface-1 hover:border-primary/40 hover:bg-surface-2 transition shadow-xs"
-                  >
-                    <div className="flex items-center justify-between text-muted-foreground group-hover:text-primary transition mb-1">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider">Suggestion</span>
-                      <ArrowRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition" />
-                    </div>
-                    <div className="text-[13px] text-foreground/90 line-clamp-2 leading-snug">{q}</div>
+              <h1 className="text-[26px] font-bold text-white mb-2 tracking-tight">What can I help with?</h1>
+              {activeRepo && (
+                <p className="text-[13px] text-white/35 mb-8">
+                  Searching <span className="text-white/55 font-medium">{activeRepo.org}/{activeRepo.name}</span>
+                </p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-[600px]">
+                {suggested.slice(0, 6).map(q => (
+                  <button key={q} onClick={() => ask(q)}
+                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-[#2f2f2f] hover:bg-[#383838] border border-white/[0.07] hover:border-white/[0.14] transition text-left group">
+                    <span className="text-[12.5px] text-white/65 group-hover:text-white/85 transition leading-snug">{q}</span>
+                    <ArrowUp className="w-3.5 h-3.5 text-white/20 group-hover:text-white/50 shrink-0 transition" />
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            /* ── Message thread ─────────────────────────────────────────── */
-            <div className="max-w-3xl mx-auto w-full px-4 py-8 space-y-8">
+            /* ── Message thread ──────────────────────────────────────────── */
+            <div className="max-w-[680px] mx-auto w-full px-4 py-8 space-y-7 pb-36">
               {messages.map((msg, idx) =>
                 msg.role === "user" ? (
-                  /* User bubble */
-                  <div key={idx} className="flex items-start justify-end gap-3">
-                    <div className="max-w-[75%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 text-sm font-medium shadow-sm leading-relaxed">
+                  <div key={idx} className="flex justify-end">
+                    <div className="max-w-[80%] bg-[#2f2f2f] rounded-3xl px-5 py-3 text-[15px] leading-relaxed text-white whitespace-pre-wrap">
                       {msg.text}
-                    </div>
-                    <div className="w-8 h-8 rounded-full bg-surface-2 border border-border flex items-center justify-center shrink-0">
-                      <UserIcon className="w-4 h-4 text-foreground" />
                     </div>
                   </div>
                 ) : (
-                  /* Assistant bubble */
                   <div key={idx} className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0 mt-1">
-                      <Bot className="w-4 h-4 text-primary" />
+                    <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0 mt-0.5">
+                      <Sparkles className="w-3 h-3 text-black" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      {/* Answer text */}
-                      <FormattedMessageText text={msg.text} />
-
-                      {/* Execution flow */}
-                      {msg.flow.length > 0 && (
-                        <div className="mt-5 rounded-xl bg-surface-1 border border-border p-4 space-y-2">
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5 mb-3">
-                            <Layers className="w-3.5 h-3.5 text-primary" /> Execution Flow
-                          </div>
-                          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-                            {msg.flow.map((f, i) => (
-                              <div key={f.label + i} className="flex items-center gap-2 shrink-0">
-                                <div className="px-3 py-2 rounded-lg bg-surface-2 border border-border text-xs">
-                                  <div className="font-medium text-foreground">{f.label}</div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">({f.meta})</div>
-                                </div>
-                                {i < msg.flow.length - 1 && <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
-                              </div>
-                            ))}
-                          </div>
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <Markdown text={msg.text} />
+                      {msg.files?.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-1.5">
+                          {msg.files.map((f, i) => (
+                            <a key={i}
+                              href={activeRepo ? `https://github.com/${activeRepo.org}/${activeRepo.name}/blob/${activeRepo.branch}/${f.path}` : "#"}
+                              target="_blank" rel="noreferrer"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.05] border border-white/10 hover:bg-white/[0.09] transition text-[11px] text-white/50 hover:text-white/80">
+                              <FileCode className="w-3 h-3 text-white/25 shrink-0" />{f.name}
+                            </a>
+                          ))}
                         </div>
                       )}
-
-                      {/* Source files */}
-                      {msg.files.length > 0 && (
-                        <div className="mt-4 space-y-2">
-                          <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                            <Code2 className="w-3.5 h-3.5 text-primary" /> Source Files ({msg.files.length})
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {msg.files.map((f, i) => {
-                              const githubUrl = activeRepo
-                                ? `https://github.com/${activeRepo.org}/${activeRepo.name}/blob/${activeRepo.branch}/${f.path}`
-                                : "#";
-                              return (
-                                <a
-                                  key={f.name + i}
-                                  href={githubUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="p-3 rounded-xl bg-surface-1 border border-border hover:border-primary/40 hover:bg-surface-2 transition flex items-center gap-3 group"
-                                >
-                                  <FileCode className="w-4 h-4 text-primary shrink-0" />
-                                  <div className="min-w-0 flex-1">
-                                    <div className="text-xs font-medium truncate text-foreground flex items-center gap-1">
-                                      <span>{f.name}</span>
-                                      <ArrowUpRight className="w-3 h-3 opacity-0 group-hover:opacity-100 transition shrink-0 text-primary" />
-                                    </div>
-                                    <div className="text-[10px] text-muted-foreground truncate">{f.path}</div>
-                                  </div>
-                                </a>
-                              );
-                            })}
-                          </div>
+                      {msg.followups?.length > 0 && (
+                        <div className="mt-4 space-y-1.5">
+                          {msg.followups.map((q, i) => (
+                            <button key={i} onClick={() => ask(q)}
+                              className="flex items-center justify-between gap-3 w-full text-left px-4 py-2.5 rounded-xl bg-[#2a2a2a] hover:bg-[#333] border border-white/[0.07] hover:border-white/[0.14] transition group">
+                              <span className="text-[13px] text-white/60 group-hover:text-white/80 transition">{q}</span>
+                              <ChevronRight className="w-3.5 h-3.5 text-white/20 group-hover:text-white/50 shrink-0" />
+                            </button>
+                          ))}
                         </div>
                       )}
-
-                      {/* Follow-ups */}
-                      {msg.followups.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-border/50">
-                          <div className="text-[11px] font-medium text-muted-foreground mb-2">Suggested follow-ups:</div>
-                          <div className="flex flex-wrap gap-2">
-                            {msg.followups.map((q) => (
-                              <button
-                                key={q}
-                                onClick={() => handleAsk(q)}
-                                className="text-xs px-3 py-1.5 rounded-full bg-surface-1 border border-border hover:border-primary/40 hover:bg-surface-2 transition text-foreground/90"
-                              >
-                                {q} →
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Copy button */}
-                      <button
-                        onClick={() => copyMessage(msg.text, idx)}
-                        className="mt-3 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition px-2 py-1 rounded-lg hover:bg-surface-1"
-                      >
-                        {copiedMsgIdx === idx ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
-                        <span>{copiedMsgIdx === idx ? "Copied" : "Copy"}</span>
-                      </button>
                     </div>
                   </div>
                 )
               )}
 
-              {/* Pending user message */}
-              {pendingQuestion && (
-                <div className="flex items-start justify-end gap-3">
-                  <div className="max-w-[75%] bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-5 py-3.5 text-sm font-medium shadow-sm">
-                    {pendingQuestion}
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-surface-2 border border-border flex items-center justify-center shrink-0">
-                    <UserIcon className="w-4 h-4 text-foreground" />
+              {/* Optimistic user message while waiting for stream to start */}
+              {pendingMsg && (
+                <div className="flex justify-end">
+                  <div className="max-w-[80%] bg-[#2f2f2f] rounded-3xl px-5 py-3 text-[15px] leading-relaxed text-white whitespace-pre-wrap">
+                    {pendingMsg}
                   </div>
                 </div>
               )}
 
-              {/* Streaming response */}
-              {streamingMessage && (
+              {/* Streaming assistant response */}
+              {(streaming || streamText) && (
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center shrink-0 mt-1">
-                    <Bot className="w-4 h-4 text-primary animate-pulse" />
+                  <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center shrink-0 mt-0.5">
+                    <Sparkles className={`w-3 h-3 text-black ${streaming && !streamText ? "animate-pulse" : ""}`} />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    {streamingMessage.text ? (
-                      <FormattedMessageText text={streamingMessage.text} />
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    {streamText ? (
+                      <>
+                        <Markdown text={streamText} />
+                        {streaming && <span className="inline-block w-0.5 h-4 bg-white/60 ml-0.5 animate-pulse rounded-sm align-middle" />}
+                      </>
                     ) : (
-                      <div className="flex items-center gap-2.5 text-sm text-muted-foreground py-2">
-                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
-                        <span>Searching codebase &amp; generating response…</span>
+                      <div className="flex items-center gap-1.5 py-2">
+                        {[0, 160, 320].map(d => <span key={d} className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}
                       </div>
                     )}
                   </div>
                 </div>
               )}
-
-              <div ref={bottomRef} />
+              <div className="h-2" />
             </div>
           )}
         </div>
 
-        {/* ─── Input Bar ─────────────────────────────────────────────────── */}
-        <div className="border-t border-border bg-background px-4 py-4 shrink-0">
-          <div className="max-w-3xl mx-auto">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleAsk(input);
-              }}
-              className="relative"
-            >
+        {/* ── Floating input bar ──────────────────────────────────────────── */}
+        <div className="absolute bottom-0 left-0 right-0 px-4 pb-5 pt-16 pointer-events-none"
+          style={{ background: "linear-gradient(to top, #212121 60%, transparent)" }}>
+          <div className="max-w-[680px] mx-auto pointer-events-auto">
+            <div className="flex items-end gap-3 bg-[#2f2f2f] rounded-2xl border border-white/10 px-4 py-3 shadow-2xl focus-within:border-white/[0.22] transition-colors">
               <textarea
-                ref={inputRef}
+                ref={textareaRef}
                 value={input}
-                onChange={(e) => {
+                onChange={e => {
                   setInput(e.target.value);
-                  // Auto-resize up to ~6 lines
                   e.target.style.height = "auto";
                   e.target.style.height = Math.min(e.target.scrollHeight, 160) + "px";
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleAsk(input);
-                  }
-                }}
-                placeholder={
-                  activeRepo
-                    ? `Ask anything about ${activeRepo.org}/${activeRepo.name}…`
-                    : "Ask a technical question about your codebase…"
-                }
-                rows={1}
-                className="w-full resize-none pl-5 pr-14 py-4 rounded-2xl bg-surface-1 border border-border text-sm placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40 transition shadow-sm leading-relaxed"
-                style={{ minHeight: "56px", maxHeight: "160px" }}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(input); } }}
+                placeholder="Ask anything about your codebase…"
+                rows={1} disabled={streaming}
+                className="flex-1 resize-none bg-transparent text-[14.5px] text-white placeholder:text-white/30 focus:outline-none leading-relaxed disabled:opacity-50"
+                style={{ minHeight: "24px", maxHeight: "160px" }}
               />
-              <button
-                type="submit"
-                disabled={isStreaming || !input.trim()}
-                className="absolute right-3 bottom-3 h-10 w-10 rounded-xl bg-primary text-primary-foreground flex items-center justify-center hover:brightness-95 transition disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
-              >
-                {isStreaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              <button onClick={() => ask(input)} disabled={!input.trim() || streaming}
+                className="w-8 h-8 rounded-full bg-white flex items-center justify-center shrink-0 hover:bg-white/85 transition disabled:opacity-25 disabled:cursor-not-allowed">
+                {streaming
+                  ? <Loader2 className="w-3.5 h-3.5 text-black animate-spin" />
+                  : <ArrowUp className="w-3.5 h-3.5 text-black" />
+                }
               </button>
-            </form>
-            <p className="text-center text-[11px] text-muted-foreground mt-2.5">
-              Press <kbd className="px-1 py-0.5 rounded bg-surface-2 border border-border font-mono text-[10px]">Enter</kbd> to send &nbsp;·&nbsp; <kbd className="px-1 py-0.5 rounded bg-surface-2 border border-border font-mono text-[10px]">Shift+Enter</kbd> for new line &nbsp;·&nbsp; AutoScribe Vector RAG
+            </div>
+            <p className="text-center text-[11px] text-white/20 mt-2">
+              Enter to send · Shift+Enter for new line
             </p>
           </div>
         </div>

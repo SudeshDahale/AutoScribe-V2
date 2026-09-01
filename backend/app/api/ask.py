@@ -117,6 +117,54 @@ def list_conversations(
     return result
 
 
+class RenameConversationBody(BaseModel):
+    title: str
+
+
+@router.patch("/repos/{repo_id}/conversations/{conversation_id}")
+def rename_conversation(
+    repo_id: int,
+    conversation_id: int,
+    body: RenameConversationBody,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    repo = _owned_repo(repo_id, user, db)
+    conversation = (
+        db.query(ChatConversation)
+        .filter(ChatConversation.id == conversation_id, ChatConversation.repository_id == repo.id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    title = body.title.strip()
+    if title:
+        conversation.title = title
+        db.commit()
+    return {"id": conversation.id, "title": conversation.title}
+
+
+@router.delete("/repos/{repo_id}/conversations/{conversation_id}")
+def delete_conversation(
+    repo_id: int,
+    conversation_id: int,
+    user: User = Depends(get_current_user),
+    db: DBSession = Depends(get_db),
+):
+    repo = _owned_repo(repo_id, user, db)
+    conversation = (
+        db.query(ChatConversation)
+        .filter(ChatConversation.id == conversation_id, ChatConversation.repository_id == repo.id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db.query(ChatMessage).filter(ChatMessage.conversation_id == conversation.id).delete()
+    db.delete(conversation)
+    db.commit()
+    return {"success": True, "id": conversation_id}
+
+
 @router.get("/repos/{repo_id}/suggested-questions")
 def get_suggested_questions(repo_id: int, user: User = Depends(get_current_user), db: DBSession = Depends(get_db)):
     repo = _owned_repo(repo_id, user, db)

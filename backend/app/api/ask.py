@@ -104,7 +104,9 @@ def list_conversations(
             .order_by(ChatMessage.id.asc())
             .first()
         )
-        title = first_msg.text if first_msg else "New Conversation"
+        title = c.title
+        if not title:
+            title = first_msg.text if first_msg else "New Conversation"
         if len(title) > 40:
             title = title[:40] + "..."
         result.append({
@@ -143,16 +145,15 @@ def ask(
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
-        conversation = (
-            db.query(ChatConversation)
-            .filter(ChatConversation.repository_id == repo.id)
-            .order_by(ChatConversation.id.desc())
-            .first()
-        )
-        if not conversation:
-            conversation = ChatConversation(repository_id=repo.id)
-            db.add(conversation)
-            db.flush()  # need conversation.id before messages can reference it
+        # No conversation_id supplied → always start a fresh conversation.
+        # Never reuse an existing one; that would mix new questions into old chats.
+        conversation = ChatConversation(repository_id=repo.id)
+        db.add(conversation)
+        db.flush()  # need conversation.id before messages can reference it
+
+    if not conversation.title:
+        conversation.title = " ".join(question.split()[:5]) + ("..." if len(question.split()) > 5 else "")
+        db.add(conversation)
 
     db.add(ChatMessage(conversation_id=conversation.id, role="user", text=question))
 
@@ -226,7 +227,7 @@ def ask_stream(
         try:
             stream = _client.chat.completions.create(
                 model=settings.llm_model,
-                max_tokens=1024,
+                max_tokens=4096,
                 messages=[
                     {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
@@ -253,17 +254,21 @@ def ask_stream(
                     .filter(ChatConversation.id == conversation_id, ChatConversation.repository_id == repo.id)
                     .first()
                 )
+                if not conversation:
+                    # Conversation ID provided but not found — create fresh
+                    conversation = ChatConversation(repository_id=repo.id)
+                    db.add(conversation)
+                    db.flush()
             else:
-                conversation = (
-                    db.query(ChatConversation)
-                    .filter(ChatConversation.repository_id == repo.id)
-                    .order_by(ChatConversation.id.desc())
-                    .first()
-                )
-            if not conversation:
+                # No conversation_id → always create a brand-new conversation.
+                # Never reuse an existing one — that would pollute old chats.
                 conversation = ChatConversation(repository_id=repo.id)
                 db.add(conversation)
                 db.flush()
+
+            if not conversation.title:
+                conversation.title = " ".join(question.split()[:5]) + ("..." if len(question.split()) > 5 else "")
+                db.add(conversation)
 
             db.add(ChatMessage(conversation_id=conversation.id, role="user", text=question))
             db.add(ChatMessage(

@@ -14,6 +14,9 @@ import {
   ChevronRight,
   Loader2,
   ArrowUp,
+  Pencil,
+  Trash2,
+  X,
 } from "lucide-react";
 
 const searchSchema = z.object({
@@ -234,6 +237,49 @@ function AskPage() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const handleRename = async (id: number) => {
+    const trimmed = editTitle.trim();
+    if (!trimmed) {
+      setEditingId(null);
+      return;
+    }
+    try {
+      await fetch(`/api/repos/${repoId}/conversations/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      qc.invalidateQueries({ queryKey: ["conversations", repoId] });
+    } catch {
+      /* ignore */
+    } finally {
+      setEditingId(null);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    try {
+      await fetch(`/api/repos/${repoId}/conversations/${id}`, {
+        method: "DELETE",
+      });
+      qc.invalidateQueries({ queryKey: ["conversations", repoId] });
+      if (activeConvId === id) {
+        setActiveConvId(null);
+        setPendingMsg(null);
+        setStreamText("");
+        setInput("");
+        navigate({ to: "/ask", search: { repo: repoId }, replace: true });
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // Sync active conversation with URL
   useEffect(() => { setActiveConvId(urlConvId); }, [urlConvId]);
@@ -391,13 +437,104 @@ function AskPage() {
             : groups.map(([label, items]) => (
               <div key={label} className="mb-4">
                 <p className="px-3 pb-1 text-[10px] font-medium text-white/25 uppercase tracking-wider">{label}</p>
-                {items.map(c => (
-                  <button key={c.id}
-                    onClick={() => { setActiveConvId(c.id); navigate({ to: "/ask", search: { repo: repoId, conversationId: String(c.id) } }); }}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-[12px] truncate transition mb-0.5 ${activeConvId === c.id ? "bg-white/10 text-white" : "text-white/55 hover:text-white hover:bg-white/[0.06]"}`}>
-                    {c.title || "New conversation"}
-                  </button>
-                ))}
+                {items.map(c => {
+                  const isActive = activeConvId === c.id;
+                  const isEditing = editingId === c.id;
+                  const isDeleting = deletingId === c.id;
+
+                  if (isEditing) {
+                    return (
+                      <div key={c.id} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10 border border-white/20 mb-0.5">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={editTitle}
+                          onChange={e => setEditTitle(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") handleRename(c.id);
+                            if (e.key === "Escape") setEditingId(null);
+                          }}
+                          className="flex-1 min-w-0 bg-transparent text-[12px] text-white focus:outline-none px-1 py-0.5"
+                        />
+                        <button
+                          onClick={() => handleRename(c.id)}
+                          className="p-1 text-green-400 hover:text-green-300 transition shrink-0"
+                          title="Save"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="p-1 text-white/40 hover:text-white transition shrink-0"
+                          title="Cancel"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  if (isDeleting) {
+                    return (
+                      <div key={c.id} className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-red-500/15 border border-red-500/30 text-[11px] mb-0.5">
+                        <span className="text-red-300 truncate pr-1">Delete?</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => handleDelete(c.id)}
+                            className="px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-500 font-medium transition text-[10px]"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            onClick={() => setDeletingId(null)}
+                            className="px-1 py-0.5 text-white/60 hover:text-white transition text-[10px]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={c.id}
+                      className={`group relative flex items-center justify-between rounded-lg px-3 py-2 text-[12px] transition mb-0.5 cursor-pointer ${
+                        isActive ? "bg-white/10 text-white font-medium" : "text-white/55 hover:text-white hover:bg-white/[0.06]"
+                      }`}
+                      onClick={() => {
+                        setActiveConvId(c.id);
+                        navigate({ to: "/ask", search: { repo: repoId, conversationId: String(c.id) } });
+                      }}
+                    >
+                      <span className="truncate flex-1 pr-1">{c.title || "New conversation"}</span>
+
+                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0 transition-opacity">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingId(c.id);
+                            setEditTitle(c.title || "New conversation");
+                          }}
+                          className="p-1 text-white/40 hover:text-white hover:bg-white/10 rounded transition"
+                          title="Rename"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingId(c.id);
+                          }}
+                          className="p-1 text-white/40 hover:text-red-400 hover:bg-white/10 rounded transition"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             ))
           }

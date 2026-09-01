@@ -2,7 +2,6 @@ import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
-import { RepoProvider } from "@/lib/repo-store";
 
 export const Route = createFileRoute("/_app")({
   component: AppLayout,
@@ -46,34 +45,33 @@ function AppLayout() {
   }, []);
 
   return (
-    <>
-      <div className="min-h-screen bg-background text-foreground">
-        <Sidebar
+    <div className="min-h-screen bg-background text-foreground">
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={toggle}
+        mobileOpen={mobileOpen}
+        onCloseMobile={() => setMobileOpen(false)}
+      />
+      {/* Main content area — padding is removed when #ask-ai-container is present */}
+      <div
+        className={`transition-[padding] duration-200 ease-out flex flex-col min-h-screen ${
+          collapsed ? "lg:pl-[68px]" : "lg:pl-[248px]"
+        }`}
+      >
+        <Topbar
           collapsed={collapsed}
           onToggle={toggle}
-          mobileOpen={mobileOpen}
-          onCloseMobile={() => setMobileOpen(false)}
+          onOpenMobile={() => setMobileOpen(true)}
         />
-        {/* Main content padding always tracks the *pinned* collapsed state.
-            When collapsed and the user hovers the sidebar, it floats OVER
-            the content rather than pushing it — no layout shift. */}
-        <div
-          className={`transition-[padding] duration-200 ease-out ${
-            collapsed ? "lg:pl-[68px]" : "lg:pl-[248px]"
-          }`}
-        >
-          <Topbar
-            collapsed={collapsed}
-            onToggle={toggle}
-            onOpenMobile={() => setMobileOpen(true)}
-          />
-          <main className="px-5 sm:px-8 py-7">
-            <div className="mx-auto max-w-[1240px]">
-              <Outlet />
-            </div>
-          </main>
-        </div>
+        {/* The main tag removes its padding + max-width when Ask AI is active so
+            the page can use the full remaining viewport. */}
+        <main className="flex-1 flex flex-col min-h-0 [&:not(:has(#ask-ai-container))]:px-5 [&:not(:has(#ask-ai-container))]:sm:px-8 [&:not(:has(#ask-ai-container))]:py-7">
+          <div className="flex-1 flex flex-col min-h-0 mx-auto w-full [&:not(:has(#ask-ai-container))]:max-w-[1240px]">
+            <Outlet />
+          </div>
+        </main>
       </div>
-    </>
+    </div>
   );
 }
+
